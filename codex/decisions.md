@@ -16,3 +16,16 @@ Version one covers order creation and the reservation outcome: an order starts
 reserved stock out of version one; retain them as [version-two ideas](version-2.md).
 
 Detailed implementation choices remain subject to the ongoing design discussion.
+
+## Version-one reliability requirements
+
+The user explicitly confirmed that all three belong in version one:
+
+- All-or-nothing inventory reservation: reserve every order item in one database
+  transaction, or reserve none when any item lacks sufficient stock.
+- Duplicate-event protection: repeated delivery must not reserve stock twice or
+  apply an order outcome more than once.
+- Transactional outbox: persist each business change and its outgoing event in
+  the same database transaction, then publish the event asynchronously to Kafka.
+
+The verified commit-and-push checkpoint workflow has also been approved.
