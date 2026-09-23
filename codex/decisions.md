@@ -15,7 +15,7 @@ Version one covers order creation and the reservation outcome: an order starts
 `PENDING` and becomes `CONFIRMED` or `REJECTED`. Keep cancellation and releasing
 reserved stock out of version one; retain them as [version-two ideas](version-2.md).
 
-Detailed implementation choices remain subject to the ongoing design discussion.
+The consolidated design is recorded in [design.md](design.md).
 
 ## Version-one reliability requirements
 
@@ -29,3 +29,12 @@ The user explicitly confirmed that all three belong in version one:
   the same database transaction, then publish the event asynchronously to Kafka.
 
 The verified commit-and-push checkpoint workflow has also been approved.
+
+## Version-one observability
+
+Include Spring Boot Actuator, Micrometer, and Prometheus-format metrics in both
+services, plus structured logs with order and event correlation identifiers.
+Expose health, readiness/liveness, and metrics on separate management ports bound
+to localhost by Compose. Keep identifiers out of metric labels.
+
+Prometheus infrastructure, Grafana dashboards, and alerting remain version-two ideas.

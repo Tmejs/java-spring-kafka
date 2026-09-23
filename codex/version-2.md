@@ -17,3 +17,10 @@ Before implementing, decide:
 
 Include integration tests for cancellation racing with reservation, duplicate
 events, and recovery after a service restart.
+
+## Monitoring infrastructure
+
+Add a Prometheus server to scrape the version-one Actuator endpoints, Grafana
+dashboards for service health and reservation processing, and alerts for growing
+outbox backlogs and repeated processing failures. The metric instrumentation and
+Prometheus exposition endpoints themselves belong to version one.
