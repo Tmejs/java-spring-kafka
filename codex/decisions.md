@@ -38,3 +38,13 @@ Expose health, readiness/liveness, and metrics on separate management ports boun
 to localhost by Compose. Keep identifiers out of metric labels.
 
 Prometheus infrastructure, Grafana dashboards, and alerting remain version-two ideas.
+
+## Approved version-one security extension
+
+Use Keycloak in Compose and Spring Security JWT resource servers, with CUSTOMER
+and INVENTORY_ADMIN roles, owner-restricted order access, and owner-scoped
+idempotency keys. OpenAPI/Swagger uses authorization code with PKCE; generated
+clients accept bearer tokens. Protect metrics with a dedicated monitoring scope.
+Validate JWT signature, issuer, audience, and validity times. Include negative
+authentication/authorization tests and Alice/Bob isolation tests. Kafka carries no
+access tokens and stays internal to Compose; broker authentication/ACLs/TLS are v2.

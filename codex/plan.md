@@ -12,7 +12,8 @@ events connect transactional outboxes and idempotent consumers. Maven generates
 HTTP interfaces and clients from OpenAPI; Docker Compose runs the entire demo.
 
 **Tech Stack:** Java 25, Spring Boot 4, Maven Wrapper, Spring Kafka, Spring Data JPA,
-PostgreSQL, Flyway, OpenAPI Generator, Actuator, Micrometer, Testcontainers.
+PostgreSQL, Flyway, OpenAPI Generator, Actuator, Micrometer, Testcontainers,
+Spring Security OAuth2 Resource Server, Keycloak.
 
 **Spec:** [Approved design](design.md).
 
@@ -28,7 +29,8 @@ PostgreSQL, Flyway, OpenAPI Generator, Actuator, Micrometer, Testcontainers.
 - Metrics have bounded labels; order/event identifiers belong in structured logs.
 - Follow `codex/git-workflow.md`: verify, update progress, commit, push, confirm sync.
 - Keep all agent working documents under `codex/`; normal source files stay in modules.
-- Do not add v2 features, a frontend, payment, or identity infrastructure.
+- Include Keycloak identity infrastructure; do not add v2 features, a frontend,
+  payment, or a custom authentication service.
 
 ## Source map and conventions
 
@@ -105,6 +107,9 @@ operations `createProduct`, `listProducts`, `getProduct`, `addStock`.
     post:
       operationId: addStock
   ```
+- [ ] Define OAuth2 authorization-code security, token/authorization URLs, 401/403
+  problem responses, operation-level access rules, and PKCE Swagger settings.
+  Generated clients accept access tokens supplied by callers.
 - [ ] Package contracts, unpack them during dependent modules' initialize phase,
   and generate Spring interfaces and Java clients at generate-sources. Select a
   generator/library combination verified compatible with Boot 4; keep generated
@@ -114,6 +119,42 @@ operations `createProduct`, `listProducts`, `getProduct`, `addStock`.
 - [ ] Run `./mvnw clean verify`; confirm both clients and server interfaces compile,
   generated output stays under target, and the reactor works from a clean checkout.
 - [ ] Commit/push: `feat: generate APIs and clients from OpenAPI contracts`.
+
+## 2a. Identity provider and resource-server security
+
+Execute after checkpoint 2 and before business API implementation.
+
+**Files:** `infra/keycloak/reservation-realm.json`, `.env.example`; both service
+POMs and application YAML; both services `security/{SecurityConfiguration,
+RealmRoleConverter}.java`; both services `security/JwtValidationIT.java` and
+`security/AuthorizationTest.java`; `O/security/CurrentOwner.java`.
+
+**Produces:** validated JWT principals, explicit role/scope authorization, and
+`CurrentOwner.subject()` derived only from the authenticated JWT `sub` claim.
+
+- [ ] Import a realm with CUSTOMER and INVENTORY_ADMIN roles, Alice/Bob/admin demo
+  users, a public Swagger client with exact redirect URIs and mandatory PKCE S256,
+  narrowly scoped demo service accounts, and a monitoring client. Disable password
+  grants. Audience mappers emit orders-api/inventory-api only where needed.
+- [ ] Write token tests using a test signing key and served JWKS: valid token passes;
+  wrong signature, issuer, audience, expired token, and future not-before return 401.
+  Add authorization tests using mock JWTs for each route/role and a real Keycloak
+  Testcontainer test proving imported realm client credentials produce valid tokens.
+  ```java
+  assertThat(missingTokenStatus).isEqualTo(401);
+  assertThat(customerStockMutationStatus).isEqualTo(403);
+  assertThat(wrongAudienceStatus).isEqualTo(401);
+  ```
+- [ ] Implement stateless bearer-only security chains and explicit audience/issuer
+  validation. Map configured realm roles; deny unmatched routes. Permit local
+  Swagger/spec resources and minimal health; protect metrics with metrics.read.
+  Disable CSRF only on the stateless bearer API/management chains; configure
+  specific origins if needed. Never log Authorization or raw tokens.
+- [ ] Add owner isolation assertions to checkpoints 3/4 when controllers exist:
+  Alice creates/reads her order; Bob receives 404; each can use the same idempotency
+  key independently. No role grants implicit access to another customer's order.
+- [ ] Run focused security tests and `./mvnw verify`; record the imported realm and
+  JWT checks. Commit/push: `feat: secure APIs with Keycloak JWT authentication`.
 
 ## 3. Service-owned databases and product API
 
@@ -135,7 +176,7 @@ int)` and reservation processing later use identical pessimistic row locks.
   ```
 - [ ] Create order/items, idempotency, outbox, processed-event tables in Orders;
   products, reservations, outbox, processed-event tables in Inventory. Include
-  unique event IDs, unique reservation order IDs, unique idempotency keys,
+  unique event IDs, unique reservation order IDs, unique owner/key pairs,
   nonnegative stock checks, and pending-outbox indexes. Store outbox payload as text.
 - [ ] Set Hibernate `ddl-auto: validate`; include Flyway PostgreSQL support. Create
   repositories and explicit generated-model mapping in thin controllers.
@@ -167,12 +208,14 @@ event type/version and reject unsupported versions without trusting class header
   assertThat(pendingOutboxCount).isEqualTo(1);
   ```
 - [ ] Canonicalize item order by product ID before hashing. Atomically claim the
-  idempotency key using PostgreSQL `INSERT ... ON CONFLICT DO NOTHING`; avoid
+  `(owner_subject, idempotency_key)` using PostgreSQL `INSERT ... ON CONFLICT DO NOTHING`; avoid
   catching a constraint violation and continuing an aborted transaction.
 - [ ] Save order, items, original response/fingerprint, and serialized OrderCreated
   outbox entry in one transaction. A conflicting key returns 409; a matching key
   returns the original 202 body and Location even if order status has since changed.
-- [ ] Implement GET order with current status and rejection reason. Inject `Clock`
+- [ ] Derive ownership from the authenticated JWT subject and persist it on orders.
+  Implement GET order with an owner-qualified query (404 for other owners),
+  current status, and rejection reason. Test different subjects using the same key. Inject `Clock`
   for timestamps; use generated HTTP clients in actual endpoint tests.
 - [ ] Run focused tests and `./mvnw verify`; commit/push:
   `feat: create idempotent orders with transactional outbox`.
@@ -268,7 +311,8 @@ both services `observability/ObservabilityIT.java`; listener correlation handlin
   assertThat(metricTagKeys).doesNotContain("orderId", "eventId", "productId");
   ```
 - [ ] Add Actuator/Prometheus registry; expose only health and prometheus. Enable
-  probes and separate management ports. Keep liveness independent of DB/Kafka;
+  probes and separate management ports. Require `metrics.read` and the correct
+  audience for metrics; permit minimal health responses without authentication. Keep liveness independent of DB/Kafka;
   readiness includes DB and a bounded Kafka connectivity check.
 - [ ] Add orders-created and reservation-outcome counters after transaction commit,
   reservation timer, publisher failures, duplicates, and DLT outcomes. Refresh
@@ -281,16 +325,21 @@ both services `observability/ObservabilityIT.java`; listener correlation handlin
 ## 9. Complete Docker Compose runtime
 
 **Files:** `compose.yaml`, `.dockerignore`, each service `Dockerfile`,
-`infra/postgres/init-databases.sh`, `infra/kafka/init-topics.sh`.
+`infra/postgres/init-databases.sh`, `infra/kafka/init-topics.sh`,
+`infra/keycloak/reservation-realm.json`, `.env.example`.
 
 **Produces:** two Java 25 images, service-owned databases/roles, one KRaft broker,
-four explicit topics, persistent volumes, localhost API/management mappings.
+four explicit topics, Keycloak with its own database, persistent volumes,
+localhost API/management/identity mappings. Do not publish Kafka host ports.
 
 - [ ] Build service jars with a Java 25 Maven build stage, copy executable jars
   into Java 25 runtime images running as non-root. Pin real image tags verified
   available for the host architecture. Keep health-check tools available in images.
 - [ ] Configure separate database owners without cross-database table grants.
   Initialize `orders.v1`, `reservation-results.v1`, and both `.DLT` topics.
+- [ ] Add pinned Keycloak in local development mode with realm import, a separate
+  database/role, and localhost port 8180. Configure external issuer/internal JWKS
+  routing consistently; verify tokens issued through localhost work in containers.
 - [ ] Map Orders API/management to localhost 8080/9080; Inventory to 8081/9081.
   Add named data volumes, health checks, and dependency readiness conditions.
   Use explicit demo-only database credentials; no real secrets in Git.
@@ -307,7 +356,9 @@ four explicit topics, persistent volumes, localhost API/management mappings.
 
 **Produces:** a bounded, repeatable success/rejection demo and manual recovery guide.
 
-- [ ] Implement demo with unique products/keys each run: create product, add stock,
+- [ ] Obtain short-lived tokens using scoped demo service-account clients; use a
+  separate metrics client. Never print tokens or store them in generated artifacts.
+  Implement demo with unique products/keys each run: create product, add stock,
   place a satisfiable order, poll to CONFIRMED, place an excessive order, poll to
   REJECTED, verify remaining stock, and fetch both metrics endpoints. Fail on HTTP
   errors/unexpected states/timeouts. Document required curl/jq tools.
@@ -317,6 +368,7 @@ four explicit topics, persistent volumes, localhost API/management mappings.
   automatically or rewrite invalid events while claiming their old identity.
 - [ ] Document architecture, event schemas, API examples, generated-client usage,
   migration ownership, reliability guarantees/limits, metrics, troubleshooting,
+  Alice/Bob browser login with PKCE, roles/ownership, demo-only credentials,
   checks, retained-volume shutdown, and destructive reset as separate commands.
 - [ ] Run clean `./mvnw verify`, Compose smoke/demo, duplicate replay, and recovery
   scenarios. Record actual results/limitations in progress; reconcile every design

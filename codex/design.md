@@ -12,8 +12,9 @@ communicating reliably through Kafka. Use Maven and start the complete system wi
 `REJECTED`. Reservation is all-or-nothing. Cancellation, release of stock, and
 monitoring infrastructure are deferred to [version 2](version-2.md).
 
-There is no payment processing, shipping, frontend, or customer identity system in
-this local demonstration. API and management port mappings bind to localhost.
+There is no payment processing, shipping, or custom frontend. Keycloak supplies
+identity; the application does not implement a password or login service. API,
+identity-provider, and management port mappings bind to localhost.
 
 ## Repository and module boundaries
 
@@ -45,8 +46,10 @@ invalid input. Prices and monetary totals are outside this reservation demo.
 
 Creation requires an `Idempotency-Key` and returns `202 Accepted`, an order ID,
 `PENDING` status, and a Location header. Persist a normalized request fingerprint
-and the original creation response with a unique key in the same transaction.
-The same key and same request return that response; a different request returns
+and the original creation response with a unique `(owner_subject, idempotency_key)`
+constraint in the same transaction. The owner comes from the validated JWT subject,
+never the request body. The application trusts one configured issuer.
+For the same owner, the same key and same request return that response; a different request returns
 `409 Conflict`. Concurrent requests with the same key create only one order.
 Retain keys for the lifetime of the demo data.
 
@@ -106,10 +109,52 @@ Malformed events must also reach the dead-letter path. Technical failures leave
 orders `PENDING`; they are not business rejections. Document inspection and manual
 replay preserving event IDs. Do not include an automatic replay service in v1.
 
+## Security
+
+Both services use Spring Security OAuth2 Resource Server with JWT access tokens
+issued by a pinned Keycloak container. Validate signature, issuer, expiration,
+not-before, and the target service audience (`orders-api` or `inventory-api`).
+Map only the configured realm roles into authorities; deny unmatched routes.
+
+- `CUSTOMER`: create/read own orders and list/get products.
+- `INVENTORY_ADMIN`: create products, add stock, and list/get products. This role
+  does not imply access to customer orders.
+- `metrics.read`: dedicated machine-client scope for Prometheus endpoints, with
+  the appropriate service audience and no business roles.
+
+Orders queries include the authenticated subject; return 404 for another owner's
+order, preventing enumeration. Missing/invalid credentials return 401; valid
+credentials without the required role/scope return 403. Never accept ownership
+from a caller-supplied field. Scope idempotency keys and replay responses by owner.
+
+Define OAuth2 Authorization Code flow in OpenAPI and enable PKCE S256 in Swagger
+UI with a public client, exact redirect URIs, and no browser client secret. Clients
+accept caller-provided access tokens. APIs are stateless, accept bearer headers,
+and do not use cookie authentication; disable CSRF only for these bearer-only API
+and management chains. Allow only explicit local Swagger origins when needed.
+
+Import a demo realm with Alice, Bob, and an inventory administrator. Disable direct
+password grants. Use separate service-account clients with least-privilege roles
+for scripted demonstrations, plus a monitoring client; their credentials are local
+demo configuration, never production secrets. Browser and container URLs must
+agree on the external issuer. Configure an internal JWKS URL separately when
+necessary, retaining validation of the external issuer. Document local HTTP and
+Keycloak development mode as local-only choices.
+
+No token or authorization header is written to logs or Kafka events. Kafka is
+accessible only within the Compose network; broker authentication, ACLs, and TLS
+are deferred to version two. Local network isolation is not broker authentication.
+
+Tests cover real JWT signature/issuer/audience/time validation, role restrictions,
+Alice/Bob ownership isolation, user-scoped idempotency, and protected metrics.
+The Compose demo includes Keycloak token acquisition; browser Swagger login covers
+human users, while scripts use client credentials. Never use the password grant
+as a shortcut for test users.
+
 ## Runtime
 
-Compose runs the two applications, a single Kafka broker in KRaft mode, and
-PostgreSQL with persistent volumes. Include explicit topic initialization,
+Compose runs the two applications, Keycloak, a single Kafka broker in KRaft mode,
+and PostgreSQL with persistent volumes. Keycloak owns a separate database and role. Include explicit topic initialization,
 health checks, and startup dependency conditions. Applications must tolerate
 dependency outages after startup as well. Docker builds run Maven with Java 25,
 so a host JDK/Maven installation is not needed to launch the demo.
@@ -122,7 +167,8 @@ depend on PostgreSQL or Kafka, avoiding restarts caused by dependency outages.
 
 Include Actuator, Micrometer, and `micrometer-registry-prometheus` in both services.
 Explicitly expose health and `/actuator/prometheus`, enable readiness/liveness
-probes, and avoid exposing unrelated management endpoints.
+probes, and avoid exposing unrelated management endpoints. Minimal health/probe
+responses are unauthenticated; Prometheus requires the `metrics.read` scope.
 
 Collect HTTP latency/errors, JVM, database pool, and Kafka listener metrics.
 Instrument business counters for created orders and reservation outcomes, plus
@@ -153,6 +199,8 @@ Use focused unit tests and Testcontainers integration tests with actual Kafka
 and PostgreSQL. `./mvnw verify` must include the integration tests. Verify:
 
 - Fresh Flyway migrations and application startup.
+- JWT validation, role permissions, owner isolation, and metrics authorization.
+- Keycloak realm import, browser PKCE login, and machine token acquisition.
 - OpenAPI generation and generated clients exercising actual endpoints.
 - Successful multi-item reservation and insufficient/unknown-product rejection.
 - Concurrent orders cannot oversell; a rejected order reserves no partial stock.
@@ -172,4 +220,5 @@ demo commands, and cleanup, distinguishing volume-preserving shutdown from reset
 
 Follow [git-workflow.md](git-workflow.md): small coherent checkpoints, relevant
 checks, then commit and push. Keep progress and verification evidence in `codex/`.
-Review this consolidated specification before writing the implementation plan.
+The user approved the written design and subsequently approved the security
+extension. Execute the updated implementation plan in `codex/plan.md`.

@@ -24,3 +24,9 @@ Add a Prometheus server to scrape the version-one Actuator endpoints, Grafana
 dashboards for service health and reservation processing, and alerts for growing
 outbox backlogs and repeated processing failures. The metric instrumentation and
 Prometheus exposition endpoints themselves belong to version one.
+
+## Kafka security hardening
+
+Add broker authentication, topic ACLs with distinct service principals, and TLS.
+Version one uses an internal Compose network without host-published Kafka ports;
+this is local demo isolation, not an authenticated production broker deployment.
