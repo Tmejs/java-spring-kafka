@@ -8,7 +8,9 @@ locations; Codex working documents belong here.
 - [Version 2 ideas](version-2.md): deferred features, not implementation commitments.
 - [Git workflow](git-workflow.md): checkpoint and push conventions.
 - [Version-one design](design.md): architecture, contracts, reliability, and verification.
+- [Implementation plan](plan.md): ordered, verifiable implementation checkpoints.
+- [Progress](progress.md): completed checkpoints and verification evidence.
 
-An implementation plan will be added here after review of the written design.
+The written design has been approved; implementation follows the checkpoint plan.
 Use small, meaningful Git commits as checkpoints and record relevant verification
 alongside implementation progress.

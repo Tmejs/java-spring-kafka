@@ -2,7 +2,7 @@
 
 Date: 2026-09-23
 
-Status: consolidates the architecture approved in chat; ready for written review.
+Status: approved by the user in chat on 2026-09-23.
 
 ## Purpose and scope
 
