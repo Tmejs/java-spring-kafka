@@ -62,17 +62,17 @@ fixtures are implemented in the named test class alongside the test.
 
 **Produces:** five-module reactor compiling with Java 25; executable service jars.
 
-- [ ] Inspect local Java and Docker availability. Verify compatible stable versions
+- [x] Inspect local Java and Docker availability. Verify compatible stable versions
   using official dependency documentation, pin them, and record choices in progress.
-- [ ] Create the parent and children; manage common versions centrally. Set
+- [x] Create the parent and children; manage common versions centrally. Set
   `<maven.compiler.release>25</maven.compiler.release>`. Configure Surefire for
   `*Test` and Failsafe `integration-test`/`verify` for `*IT`.
-- [ ] Add the two `@SpringBootApplication` entry points; apply Boot repackaging only
+- [x] Add the two `@SpringBootApplication` entry points; apply Boot repackaging only
   to executable services. Ignore `**/target/`, IDE output, and local secret files.
-- [ ] Add GitHub Actions using Java 25 and `./mvnw -B verify` on push/pull request.
-- [ ] Run `./mvnw -B verify`; expect all five modules successful. Record environment
+- [x] Add GitHub Actions using Java 25 and `./mvnw -B verify` on push/pull request.
+- [x] Run `./mvnw -B verify`; expect all five modules successful. Record environment
   prerequisites honestly; never silently disable integration tests in later steps.
-- [ ] Commit/push: `build: initialize Java 25 Maven reactor`.
+- [x] Commit/push: `build: initialize Java 25 Maven reactor`.
 
 ## 2. Contract-first HTTP interfaces and clients
 

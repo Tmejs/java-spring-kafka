@@ -1,1 +1,4 @@
 mvnw.cmd text eol=crlf whitespace=cr-at-eol
+
+# Saved review diffs contain significant whitespace-only context lines.
+codex/execution/*.diff -whitespace

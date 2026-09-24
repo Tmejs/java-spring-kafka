@@ -42,3 +42,6 @@ their actual outcomes, and any remaining limitations before committing and pushi
   manifests identify the correct application entry points.
 - No behavioral tests were added because this checkpoint is build scaffolding;
   the plan explicitly excludes artificial scaffolding tests.
+
+- Independent review passed after pinning CI runner/actions in `9701950`.
+- Work is isolated on `feature/reservation-v1`; next checkpoint is contract generation.
