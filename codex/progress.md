@@ -108,3 +108,19 @@ their actual outcomes, and any remaining limitations before committing and pushi
   existing OpenAPI HTTP tests, and a real Keycloak realm import/token-claims test.
 - SDKMAN Temurin Java 25.0.4 `./mvnw -B verify` passed all six reactor modules:
   33 tests, zero failures, zero errors, and zero skips.
+
+## Persistence and Inventory API checkpoint — 2026-09-25
+
+- Added complete Orders and Inventory V1 Flyway schemas and JPA mappings. Both
+  services run Flyway before Hibernate `ddl-auto: validate` against PostgreSQL.
+- Implemented the generated Inventory `ProductsApi`: server UUIDs, duplicate
+  names, stable UUID pagination, product reads, and pessimistically locked stock
+  additions with validation, 404, and overflow problem responses.
+- PostgreSQL 18.1 Testcontainers tests verify both schemas plus real generated
+  client HTTP calls, signed JWT authorization, and concurrent additions without
+  lost updates. The official image digest used locally is
+  `sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f`.
+- Corrected the local Keycloak realm's SSL requirement so its documented HTTP
+  development mode works through Docker Desktop's bridge network.
+- Temurin Java 25.0.4 `./mvnw -B verify` passed all six reactor modules: 40 tests,
+  zero failures, zero errors, and zero skips.

@@ -8,6 +8,7 @@ import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.proc.SecurityContext;
 import com.sun.net.httpserver.HttpServer;
+import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -42,7 +43,7 @@ import org.springframework.web.bind.annotation.RestController;
 @SpringBootTest
 @AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
 @Import(JwtValidationIT.FixtureConfiguration.class)
-class JwtValidationIT {
+class JwtValidationIT extends OrderPostgresIntegrationTest {
 
     private static final String KEY_ID = "orders-test-key";
     private static final String ISSUER = "https://issuer.example/realms/reservation";

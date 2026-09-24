@@ -2,7 +2,7 @@
   "realm": "reservation",
   "displayName": "Reservation Demo",
   "enabled": true,
-  "sslRequired": "external",
+  "sslRequired": "none",
   "registrationAllowed": false,
   "resetPasswordAllowed": false,
   "rememberMe": true,

@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.List;
 import java.util.Map;
+import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -26,7 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 @SpringBootTest
 @AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
 @Import(AuthorizationTest.FixtureConfiguration.class)
-class AuthorizationTest {
+class AuthorizationTest extends OrderPostgresIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;

@@ -13,9 +13,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.io.ClassPathResource;
 import io.github.tmejs.reservation.orders.OrderApplication;
+import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
 
 @SpringBootTest(classes = OrderApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class OpenApiExposureIT {
+class OpenApiExposureIT extends OrderPostgresIntegrationTest {
 
     private final HttpClient client = HttpClient.newHttpClient();
 

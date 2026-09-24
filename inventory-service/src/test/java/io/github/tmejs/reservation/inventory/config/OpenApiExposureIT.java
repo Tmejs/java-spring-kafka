@@ -13,9 +13,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.io.ClassPathResource;
 import io.github.tmejs.reservation.inventory.InventoryApplication;
+import io.github.tmejs.reservation.inventory.support.InventoryPostgresIntegrationTest;
 
 @SpringBootTest(classes = InventoryApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class OpenApiExposureIT {
+class OpenApiExposureIT extends InventoryPostgresIntegrationTest {
 
     private final HttpClient client = HttpClient.newHttpClient();
 

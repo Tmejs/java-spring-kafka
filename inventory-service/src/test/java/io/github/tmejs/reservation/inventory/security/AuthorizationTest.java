@@ -3,8 +3,10 @@ package io.github.tmejs.reservation.inventory.security;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import io.github.tmejs.reservation.inventory.support.InventoryPostgresIntegrationTest;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -15,17 +17,17 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @SpringBootTest
 @AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
 @Import(AuthorizationTest.FixtureConfiguration.class)
-class AuthorizationTest {
+class AuthorizationTest extends InventoryPostgresIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -46,7 +48,7 @@ class AuthorizationTest {
         mockMvc.perform(get("/products").with(customer)).andExpect(status().isOk());
         mockMvc.perform(get("/products/00000000-0000-0000-0000-000000000001")
                         .with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
-                .andExpect(status().isOk());
+                .andExpect(status().isNotFound());
         mockMvc.perform(post("/products").with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(post("/products/00000000-0000-0000-0000-000000000001/stock")
@@ -59,11 +61,19 @@ class AuthorizationTest {
         mockMvc.perform(get("/products")
                         .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api")))
                 .andExpect(status().isOk());
-        mockMvc.perform(post("/products")
-                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api")))
-                .andExpect(status().isOk());
-        mockMvc.perform(post("/products/00000000-0000-0000-0000-000000000001/stock")
-                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api")))
+        var location = mockMvc.perform(post("/products")
+                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Policy fixture\",\"initialQuantity\":1}"))
+                .andExpect(status().isCreated())
+                .andExpect(header().exists("Location"))
+                .andReturn()
+                .getResponse()
+                .getHeader("Location");
+        mockMvc.perform(post(location + "/stock")
+                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"quantity\":1}"))
                 .andExpect(status().isOk());
     }
 
@@ -121,16 +131,6 @@ class AuthorizationTest {
 
     @RestController
     static class FixtureEndpoints {
-
-        @GetMapping({"/products", "/products/{id}"})
-        String readProduct() {
-            return "product";
-        }
-
-        @PostMapping({"/products", "/products/{id}/stock"})
-        String mutateProduct() {
-            return "mutated";
-        }
 
         @GetMapping("/actuator/prometheus")
         String metrics() {
