@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: order-service
+
+server:
+  port: 8080
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    url: /openapi/orders.yaml
+    disable-swagger-default-url: true
+    oauth:
+      client-id: reservation-swagger
+      scopes: orders-api
+      use-pkce-with-authorization-code-grant: true

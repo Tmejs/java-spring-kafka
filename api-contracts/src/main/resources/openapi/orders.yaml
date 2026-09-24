@@ -1,0 +1,236 @@
+openapi: 3.0.3
+info:
+  title: Orders API
+  version: 1.0.0
+  description: |
+    Creates and reads reservation orders. Access tokens must be issued by the
+    reservation realm and contain the `orders-api` audience. Role requirements
+    refer to Keycloak realm roles rather than OAuth scopes.
+servers:
+  - url: http://localhost:8080
+    description: Local Orders service
+tags:
+  - name: Orders
+    description: Customer-owned reservation orders.
+paths:
+  /orders:
+    post:
+      tags: [Orders]
+      operationId: createOrder
+      summary: Create a reservation order
+      description: |
+        Requires the `CUSTOMER` realm role. The caller owns the new order; the
+        owner is taken from the access token and never from this request. Reusing
+        an idempotency key with the same request replays the original response;
+        reusing it with a different request returns 409.
+      security:
+        - oauth2: [orders-api]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Non-blank caller-generated key, scoped to the authenticated subject.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '.*\S.*'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '202':
+          description: Order accepted for asynchronous stock reservation.
+          headers:
+            Location:
+              description: Absolute or origin-relative URI of the created order. Always present.
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /orders/{id}:
+    get:
+      tags: [Orders]
+      operationId: getOrder
+      summary: Get an owned order
+      description: |
+        Requires the `CUSTOMER` realm role. An order owned by another subject is
+        reported as not found to prevent identifier enumeration.
+      security:
+        - oauth2: [orders-api]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Current order state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      description: |
+        Keycloak Authorization Code flow. Business authorization uses realm roles
+        from the access token. The `orders-api` scope selects the corresponding
+        audience mapper; the resulting access token must contain that audience.
+      flows:
+        authorizationCode:
+          authorizationUrl: http://localhost:8180/realms/reservation/protocol/openid-connect/auth
+          tokenUrl: http://localhost:8180/realms/reservation/protocol/openid-connect/token
+          scopes:
+            orders-api: Request an access token with the `orders-api` audience.
+  parameters:
+    OrderId:
+      name: id
+      in: path
+      required: true
+      description: Order identifier.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: The request is malformed or violates validation constraints.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    Unauthorized:
+      description: A valid bearer access token is required.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    Forbidden:
+      description: The token lacks the required realm role or `orders-api` audience.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    NotFound:
+      description: The order does not exist for the authenticated subject.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    Conflict:
+      description: The idempotency key was already used with a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+  schemas:
+    CreateOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: |
+            Items to reserve. `productId` values must be distinct within the order;
+            repeating a product with a different quantity is also invalid.
+          items:
+            $ref: '#/components/schemas/OrderItem'
+    OrderItem:
+      type: object
+      additionalProperties: false
+      required: [productId, quantity]
+      properties:
+        productId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 2147483647
+    Order:
+      type: object
+      additionalProperties: false
+      required: [id, items, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Order lines with distinct `productId` values.
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        rejectionReason:
+          allOf:
+            - $ref: '#/components/schemas/RejectionReason'
+          nullable: true
+          description: Present only when status is `REJECTED`.
+    OrderStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, REJECTED]
+    RejectionReason:
+      type: string
+      enum: [UNKNOWN_PRODUCT, INSUFFICIENT_STOCK]
+    ProblemDetail:
+      type: object
+      additionalProperties: true
+      required: [title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          default: about:blank
+        title:
+          type: string
+          minLength: 1
+        status:
+          type: integer
+          format: int32
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+    FieldError:
+      type: object
+      additionalProperties: false
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          minLength: 1
+        message:
+          type: string
+          minLength: 1

@@ -45,3 +45,26 @@ their actual outcomes, and any remaining limitations before committing and pushi
 
 - Independent review passed after pinning CI runner/actions in `9701950`.
 - Work is isolated on `feature/reservation-v1`; next checkpoint is contract generation.
+
+- Foundation pushed and remote SHA confirmed at `7d37c77`. GitHub Actions
+  [run 36013388798](https://github.com/Tmejs/java-spring-kafka/actions/runs/36013388798)
+  completed successfully on Ubuntu.
+
+## Contract-first HTTP checkpoint — 2026-09-24
+
+- Added authoritative Orders and Inventory OpenAPI 3.0 contracts with stable
+  operation IDs, validation bounds, problem responses, documented realm-role
+  access rules, and service-specific OAuth audience scopes.
+- Pinned OpenAPI Generator 7.25.0 and springdoc 3.1.1. Maven now unpacks the
+  contract JAR at `initialize` and generates Spring Boot 4/Jackson 3 interfaces
+  and native Java clients under each module's ignored `target/` directory.
+- Both services serve the original contract resource and Swagger UI with the
+  `reservation-swagger` public client, the matching API scope, and PKCE S256.
+  The generated OpenAPI document endpoint remains disabled.
+- TDD evidence: both random-port suites first failed with 404 for the contract
+  and UI, then passed 3/3 after the resource/UI wiring was implemented.
+- Java 25 `./mvnw -B clean verify` passed all six reactor projects; both server
+  interfaces and both native client APIs compiled from a clean build.
+- Native generated clients accept caller tokens through their request interceptor
+  or per-call header map; the native template does not emit a dedicated OAuth
+  token helper.

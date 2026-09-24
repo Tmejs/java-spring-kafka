@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: inventory-service
+
+server:
+  port: 8081
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    url: /openapi/inventory.yaml
+    disable-swagger-default-url: true
+    oauth:
+      client-id: reservation-swagger
+      scopes: inventory-api
+      use-pkce-with-authorization-code-grant: true
