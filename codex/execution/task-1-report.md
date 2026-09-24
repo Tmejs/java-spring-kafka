@@ -4,9 +4,11 @@ Date: 2026-09-23
 
 ## Outcome
 
-Task 1 is implemented and verified. The repository now has a Java 25 Maven
-reactor with five child modules, two executable Spring Boot service jars, an
-official checksum-pinned Maven Wrapper, and a Java 25 GitHub Actions workflow.
+Task 1 is implemented and locally verified. The repository now has a Java 25
+Maven reactor with five child modules, two executable Spring Boot service jars,
+an official checksum-pinned Maven Wrapper, and a Java 25 GitHub Actions
+workflow. Remote checkpoint completion is recorded by the controller after
+review and push.
 
 ## Version choices and official verification
 
@@ -145,6 +147,35 @@ observability, or runtime infrastructure were implemented in this checkpoint.
    correct `Start-Class`, and report Java 25 and Spring Boot 4.1.1. Both classes
    have class-file major version 69. The three contract/module jars have no Boot
    `Main-Class`, `Start-Class`, or `Spring-Boot-Version` manifest entries.
+
+8. Review fix verification:
+
+   The workflow runner is pinned to `ubuntu-24.04`. Action references were
+   resolved from the official GitHub release and signed-commit pages, then
+   pinned to their full commit SHAs with human-readable release comments:
+
+   - `actions/checkout` v5.1.0:
+     `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09`
+     - https://github.com/actions/checkout/releases/tag/v5.1.0
+     - https://github.com/actions/checkout/commit/fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+   - `actions/setup-java` v5.7.0:
+     `b6effb05e454b25005698d916606bdc6ffcbf961`
+     - https://github.com/actions/setup-java/releases/tag/v5.7.0
+     - https://github.com/actions/setup-java/commit/b6effb05e454b25005698d916606bdc6ffcbf961
+
+   Independent tag resolution against the official remotes returned the same
+   full SHAs:
+
+   ```text
+   git ls-remote https://github.com/actions/checkout.git refs/tags/v5.1.0
+   fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  refs/tags/v5.1.0
+
+   git ls-remote https://github.com/actions/setup-java.git refs/tags/v5.7.0
+   b6effb05e454b25005698d916606bdc6ffcbf961  refs/tags/v5.7.0
+   ```
+
+   This review fix changes only CI supply-chain pins and report wording, so the
+   already successful Maven suite was not repeated. `git diff --check` passed.
 
 ## Self-review
 
