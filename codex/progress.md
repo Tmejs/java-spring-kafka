@@ -81,3 +81,18 @@ their actual outcomes, and any remaining limitations before committing and pushi
 - Native generated clients accept caller tokens through their request interceptor
   or per-call header map; the native template does not emit a dedicated OAuth
   token helper.
+
+## JWT and Keycloak security checkpoint — 2026-09-24
+
+- Both services now validate JWT signature, issuer, audience, expiration, and
+  not-before claims using Spring Security's resource-server support and separate
+  issuer/JWKS configuration.
+- Explicit route policies preserve OAuth scopes, allow only configured realm
+  roles, protect metrics with `metrics.read`, keep Swagger/spec and health public,
+  and deny unmatched routes.
+- Added `CurrentOwner.subject()` for later Orders ownership enforcement; database
+  ownership behavior remains checkpoint 4 work.
+- Added a Keycloak 26.7.4 realm with PKCE-only browser login for Alice, Bob, and
+  admin plus least-privilege Orders, Inventory, and monitoring service accounts.
+- TDD covered 12 authorization tests, 14 encoded-token validation tests, the six
+  existing OpenAPI HTTP tests, and a real Keycloak realm import/token-claims test.

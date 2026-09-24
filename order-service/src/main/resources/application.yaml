@@ -1,6 +1,13 @@
 spring:
   application:
     name: order-service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${SECURITY_ISSUER_URI:http://localhost:8180/realms/reservation}
+          jwk-set-uri: ${SECURITY_JWK_SET_URI:http://localhost:8180/realms/reservation/protocol/openid-connect/certs}
+          audiences: orders-api
 
 server:
   port: 8080
