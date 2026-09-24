@@ -62,6 +62,16 @@ their actual outcomes, and any remaining limitations before committing and pushi
   random-port HTTP tests.
 - Independent review passed without Critical or Important findings. Three minor
   contract/resource documentation cleanups are recorded in the execution ledger.
+- OpenAPI checkpoint pushed and synchronized at `94f77e7`; GitHub Actions
+  [run 36016067476](https://github.com/Tmejs/java-spring-kafka/actions/runs/36016067476)
+  completed successfully.
+
+## Local verification workflow — 2026-09-24
+
+- User requested removal of the GitHub Actions pipeline.
+- Installed Temurin Java 25.0.4 through SDKMAN and made it the active default.
+- Future checkpoints use local `./mvnw -B verify`; each result is recorded before
+  the checkpoint is pushed.
 
 ## Contract-first HTTP checkpoint — 2026-09-24
 
@@ -96,3 +106,5 @@ their actual outcomes, and any remaining limitations before committing and pushi
   admin plus least-privilege Orders, Inventory, and monitoring service accounts.
 - TDD covered 12 authorization tests, 14 encoded-token validation tests, the six
   existing OpenAPI HTTP tests, and a real Keycloak realm import/token-claims test.
+- SDKMAN Temurin Java 25.0.4 `./mvnw -B verify` passed all six reactor modules:
+  33 tests, zero failures, zero errors, and zero skips.

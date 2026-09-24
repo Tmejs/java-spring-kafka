@@ -90,3 +90,18 @@ Task 2: minor (deferred): mark documented Location response headers required in
 both contracts.
 Task 2: minor (deferred): comment the pinned springdoc UI prerequisite workaround.
 Task 2: complete (commit a447b5f, spec PASS, quality PASS with 3 deferred minors).
+Task 2 remote checkpoint: local and remote SHA matched at 94f77e7 after review
+records; GitHub Actions run 36016067476 completed SUCCESS.
+Task 2a: in progress; base 94f77e7; implementer security_implementation.
+
+Ruling: remove `.github/workflows/verify.yml` at the user's request and use local
+SDKMAN Java 25 verification as the only build gate — historical CI evidence remains
+in prior checkpoint reports, but no pipeline remains in the repository — if wrong,
+automated remote verification would need to be restored.
+
+Task 2a: locally implemented in 1c91643. Fresh controller verification with
+SDKMAN Temurin 25.0.4: `./mvnw -B verify` BUILD SUCCESS, six modules, 33 tests,
+zero failures/errors/skips. Independent review: spec PASS, quality PASS, no findings.
+Task 2a: complete (commit 1c91643, review clean).
+Owner isolation remains explicitly assigned to checkpoints 3/4 because business
+controllers and persistence do not exist yet; policy fixtures only establish roles.

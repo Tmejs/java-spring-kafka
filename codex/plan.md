@@ -58,7 +58,7 @@ fixtures are implemented in the named test class alongside the test.
 
 **Files:** root `pom.xml`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/maven-wrapper.properties`,
 `.gitignore`; `pom.xml` in all five modules; `O/OrderApplication.java`,
-`I/InventoryApplication.java`; `.github/workflows/verify.yml`.
+`I/InventoryApplication.java`.
 
 **Produces:** five-module reactor compiling with Java 25; executable service jars.
 
@@ -69,7 +69,8 @@ fixtures are implemented in the named test class alongside the test.
   `*Test` and Failsafe `integration-test`/`verify` for `*IT`.
 - [x] Add the two `@SpringBootApplication` entry points; apply Boot repackaging only
   to executable services. Ignore `**/target/`, IDE output, and local secret files.
-- [x] Add GitHub Actions using Java 25 and `./mvnw -B verify` on push/pull request.
+- [x] Install Temurin Java 25 through SDKMAN and use local `./mvnw -B verify`
+  before each pushed checkpoint. Do not maintain a GitHub Actions pipeline.
 - [x] Run `./mvnw -B verify`; expect all five modules successful. Record environment
   prerequisites honestly; never silently disable integration tests in later steps.
 - [x] Commit/push: `build: initialize Java 25 Maven reactor`.
@@ -132,11 +133,11 @@ RealmRoleConverter}.java`; both services `security/JwtValidationIT.java` and
 **Produces:** validated JWT principals, explicit role/scope authorization, and
 `CurrentOwner.subject()` derived only from the authenticated JWT `sub` claim.
 
-- [ ] Import a realm with CUSTOMER and INVENTORY_ADMIN roles, Alice/Bob/admin demo
+- [x] Import a realm with CUSTOMER and INVENTORY_ADMIN roles, Alice/Bob/admin demo
   users, a public Swagger client with exact redirect URIs and mandatory PKCE S256,
   narrowly scoped demo service accounts, and a monitoring client. Disable password
   grants. Audience mappers emit orders-api/inventory-api only where needed.
-- [ ] Write token tests using a test signing key and served JWKS: valid token passes;
+- [x] Write token tests using a test signing key and served JWKS: valid token passes;
   wrong signature, issuer, audience, expired token, and future not-before return 401.
   Add authorization tests using mock JWTs for each route/role and a real Keycloak
   Testcontainer test proving imported realm client credentials produce valid tokens.
@@ -145,7 +146,7 @@ RealmRoleConverter}.java`; both services `security/JwtValidationIT.java` and
   assertThat(customerStockMutationStatus).isEqualTo(403);
   assertThat(wrongAudienceStatus).isEqualTo(401);
   ```
-- [ ] Implement stateless bearer-only security chains and explicit audience/issuer
+- [x] Implement stateless bearer-only security chains and explicit audience/issuer
   validation. Map configured realm roles; deny unmatched routes. Permit local
   Swagger/spec resources and minimal health; protect metrics with metrics.read.
   Disable CSRF only on the stateless bearer API/management chains; configure
@@ -153,7 +154,7 @@ RealmRoleConverter}.java`; both services `security/JwtValidationIT.java` and
 - [ ] Add owner isolation assertions to checkpoints 3/4 when controllers exist:
   Alice creates/reads her order; Bob receives 404; each can use the same idempotency
   key independently. No role grants implicit access to another customer's order.
-- [ ] Run focused security tests and `./mvnw verify`; record the imported realm and
+- [x] Run focused security tests and `./mvnw verify`; record the imported realm and
   JWT checks. Commit/push: `feat: secure APIs with Keycloak JWT authentication`.
 
 ## 3. Service-owned databases and product API

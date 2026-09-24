@@ -1,0 +1,1709 @@
+diff --git a/.env.example b/.env.example
+new file mode 100644
+index 0000000..fffb106
+--- /dev/null
++++ b/.env.example
+@@ -0,0 +1,8 @@
++# Local demo service-account secrets. Replace these values in .env.
++ORDERS_DEMO_CLIENT_SECRET=replace-with-a-long-random-orders-secret
++INVENTORY_DEMO_CLIENT_SECRET=replace-with-a-long-random-inventory-secret
++MONITORING_CLIENT_SECRET=replace-with-a-long-random-monitoring-secret
++
++# Browser tokens use the host issuer; services may fetch keys over the container network.
++SECURITY_ISSUER_URI=http://localhost:8180/realms/reservation
++SECURITY_JWK_SET_URI=http://keycloak:8080/realms/reservation/protocol/openid-connect/certs
+diff --git a/codex/execution/task-2a-report.md b/codex/execution/task-2a-report.md
+new file mode 100644
+index 0000000..6feea70
+--- /dev/null
++++ b/codex/execution/task-2a-report.md
+@@ -0,0 +1,50 @@
++# Task 2a report — Keycloak JWT resource-server security
++
++Date: 2026-09-24
++
++## Outcome
++
++Orders and Inventory are stateless JWT resource servers. Spring validates the
++configured external issuer, separately configured JWKS location, service audience,
++signature, expiration, and not-before time. Each service preserves OAuth scopes and
++maps only `CUSTOMER` and `INVENTORY_ADMIN` from `realm_access.roles`.
++
++Swagger/spec and health routes are public. Prometheus requires
++`SCOPE_metrics.read`. Orders routes require `CUSTOMER`; Inventory reads accept
++`CUSTOMER` or `INVENTORY_ADMIN`, while mutations require `INVENTORY_ADMIN`.
++All unmatched routes are denied. `CurrentOwner.subject()` reads only the validated
++JWT subject.
++
++The Keycloak 26.7.4 realm defines Alice, Bob, and admin for browser authorization
++code with mandatory PKCE S256; all project clients disable direct grants. Demo
++service accounts receive one business role and one API audience each. Monitoring
++receives both API audiences and `metrics.read`, with no business role. Machine
++client secrets remain environment placeholders in the realm import.
++
++## Red/green evidence
++
++- Orders authorization RED: 5/6 assertions failed against default security
++  (`403` instead of missing-token `401`, protected routes returned `200`, and the
++  public spec returned `401`). GREEN: 6/6 policy tests passed.
++- Inventory authorization RED: 4/6 assertions failed because mutations, metrics,
++  and unmatched routes were accessible and the public spec required a token.
++  GREEN: 6/6 policy tests passed.
++- Each encoded-JWT suite RED: wrong and missing audience returned `200` instead of
++  `401`. GREEN after Boot audience configuration: 7/7 tests passed in each service,
++  covering valid token, signature, issuer, audience, expiration, and future `nbf`.
++- Realm-import RED: Keycloak rejected the absent import artifact as empty JSON.
++  GREEN: the pinned Keycloak container imported the real root realm and the one
++  integration test verified exact audiences, scopes, allowed roles, and cross-API
++  audience rejection for Orders, Inventory, and monitoring credentials.
++
++MockMvc failure printing is disabled for encoded-token tests so bearer values are
++not written to test logs.
++
++## Verification
++
++Focused authorization, encoded-JWT, and Keycloak realm-import tests passed under
++SDKMAN Temurin Java 25.0.4. The final local
++`JAVA_HOME=/Users/matrzad/.sdkman/candidates/java/25.0.4-tem ./mvnw -B verify`
++completed with `BUILD SUCCESS`: all six reactor modules passed, with 33 tests,
++zero failures, zero errors, and zero skips. This includes the six preserved
++OpenAPI HTTP tests and the real Keycloak 26.7.4 container test.
+diff --git a/codex/progress.md b/codex/progress.md
+index ae80420..f48cf3c 100644
+--- a/codex/progress.md
++++ b/codex/progress.md
+@@ -74,10 +74,25 @@ their actual outcomes, and any remaining limitations before committing and pushi
+ - Both services serve the original contract resource and Swagger UI with the
+   `reservation-swagger` public client, the matching API scope, and PKCE S256.
+   The generated OpenAPI document endpoint remains disabled.
+ - TDD evidence: both random-port suites first failed with 404 for the contract
+   and UI, then passed 3/3 after the resource/UI wiring was implemented.
+ - Java 25 `./mvnw -B clean verify` passed all six reactor projects; both server
+   interfaces and both native client APIs compiled from a clean build.
+ - Native generated clients accept caller tokens through their request interceptor
+   or per-call header map; the native template does not emit a dedicated OAuth
+   token helper.
++
++## JWT and Keycloak security checkpoint — 2026-09-24
++
++- Both services now validate JWT signature, issuer, audience, expiration, and
++  not-before claims using Spring Security's resource-server support and separate
++  issuer/JWKS configuration.
++- Explicit route policies preserve OAuth scopes, allow only configured realm
++  roles, protect metrics with `metrics.read`, keep Swagger/spec and health public,
++  and deny unmatched routes.
++- Added `CurrentOwner.subject()` for later Orders ownership enforcement; database
++  ownership behavior remains checkpoint 4 work.
++- Added a Keycloak 26.7.4 realm with PKCE-only browser login for Alice, Bob, and
++  admin plus least-privilege Orders, Inventory, and monitoring service accounts.
++- TDD covered 12 authorization tests, 14 encoded-token validation tests, the six
++  existing OpenAPI HTTP tests, and a real Keycloak realm import/token-claims test.
+diff --git a/infra/keycloak/reservation-realm.json b/infra/keycloak/reservation-realm.json
+new file mode 100644
+index 0000000..a585ee2
+--- /dev/null
++++ b/infra/keycloak/reservation-realm.json
+@@ -0,0 +1,314 @@
++{
++  "realm": "reservation",
++  "displayName": "Reservation Demo",
++  "enabled": true,
++  "sslRequired": "external",
++  "registrationAllowed": false,
++  "resetPasswordAllowed": false,
++  "rememberMe": true,
++  "roles": {
++    "realm": [
++      {
++        "name": "CUSTOMER"
++      },
++      {
++        "name": "INVENTORY_ADMIN"
++      }
++    ]
++  },
++  "users": [
++    {
++      "username": "alice",
++      "enabled": true,
++      "emailVerified": true,
++      "firstName": "Alice",
++      "lastName": "Customer",
++      "email": "alice@example.test",
++      "credentials": [
++        {
++          "type": "password",
++          "value": "alice-demo-password",
++          "temporary": false
++        }
++      ],
++      "realmRoles": [
++        "CUSTOMER"
++      ]
++    },
++    {
++      "username": "bob",
++      "enabled": true,
++      "emailVerified": true,
++      "firstName": "Bob",
++      "lastName": "Customer",
++      "email": "bob@example.test",
++      "credentials": [
++        {
++          "type": "password",
++          "value": "bob-demo-password",
++          "temporary": false
++        }
++      ],
++      "realmRoles": [
++        "CUSTOMER"
++      ]
++    },
++    {
++      "username": "admin",
++      "enabled": true,
++      "emailVerified": true,
++      "firstName": "Inventory",
++      "lastName": "Administrator",
++      "email": "admin@example.test",
++      "credentials": [
++        {
++          "type": "password",
++          "value": "admin-demo-password",
++          "temporary": false
++        }
++      ],
++      "realmRoles": [
++        "INVENTORY_ADMIN"
++      ]
++    },
++    {
++      "username": "service-account-orders-demo",
++      "enabled": true,
++      "serviceAccountClientId": "orders-demo",
++      "realmRoles": [
++        "CUSTOMER"
++      ]
++    },
++    {
++      "username": "service-account-inventory-demo",
++      "enabled": true,
++      "serviceAccountClientId": "inventory-demo",
++      "realmRoles": [
++        "INVENTORY_ADMIN"
++      ]
++    },
++    {
++      "username": "service-account-monitoring",
++      "enabled": true,
++      "serviceAccountClientId": "monitoring"
++    }
++  ],
++  "clientScopes": [
++    {
++      "name": "orders-api",
++      "description": "Request an Orders API audience",
++      "protocol": "openid-connect",
++      "attributes": {
++        "include.in.token.scope": "true",
++        "display.on.consent.screen": "true"
++      },
++      "protocolMappers": [
++        {
++          "name": "orders-api audience",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-audience-mapper",
++          "consentRequired": false,
++          "config": {
++            "included.client.audience": "orders-api",
++            "id.token.claim": "false",
++            "access.token.claim": "true",
++            "introspection.token.claim": "true"
++          }
++        }
++      ]
++    },
++    {
++      "name": "inventory-api",
++      "description": "Request an Inventory API audience",
++      "protocol": "openid-connect",
++      "attributes": {
++        "include.in.token.scope": "true",
++        "display.on.consent.screen": "true"
++      },
++      "protocolMappers": [
++        {
++          "name": "inventory-api audience",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-audience-mapper",
++          "consentRequired": false,
++          "config": {
++            "included.client.audience": "inventory-api",
++            "id.token.claim": "false",
++            "access.token.claim": "true",
++            "introspection.token.claim": "true"
++          }
++        }
++      ]
++    },
++    {
++      "name": "metrics.read",
++      "description": "Read service metrics",
++      "protocol": "openid-connect",
++      "attributes": {
++        "include.in.token.scope": "true",
++        "display.on.consent.screen": "false"
++      }
++    }
++  ],
++  "clients": [
++    {
++      "clientId": "reservation-swagger",
++      "name": "Reservation Swagger UI",
++      "enabled": true,
++      "protocol": "openid-connect",
++      "publicClient": true,
++      "bearerOnly": false,
++      "standardFlowEnabled": true,
++      "implicitFlowEnabled": false,
++      "directAccessGrantsEnabled": false,
++      "serviceAccountsEnabled": false,
++      "fullScopeAllowed": false,
++      "redirectUris": [
++        "http://localhost:8080/swagger-ui/oauth2-redirect.html",
++        "http://localhost:8081/swagger-ui/oauth2-redirect.html"
++      ],
++      "webOrigins": [
++        "http://localhost:8080",
++        "http://localhost:8081"
++      ],
++      "attributes": {
++        "pkce.code.challenge.method": "S256"
++      },
++      "defaultClientScopes": [
++        "web-origins",
++        "profile",
++        "roles",
++        "email"
++      ],
++      "optionalClientScopes": [
++        "orders-api",
++        "inventory-api"
++      ],
++      "protocolMappers": [
++        {
++          "name": "realm roles",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-usermodel-realm-role-mapper",
++          "consentRequired": false,
++          "config": {
++            "multivalued": "true",
++            "access.token.claim": "true",
++            "id.token.claim": "false",
++            "introspection.token.claim": "true",
++            "claim.name": "realm_access.roles",
++            "jsonType.label": "String"
++          }
++        }
++      ]
++    },
++    {
++      "clientId": "orders-demo",
++      "name": "Orders demo service account",
++      "enabled": true,
++      "protocol": "openid-connect",
++      "clientAuthenticatorType": "client-secret",
++      "secret": "${ORDERS_DEMO_CLIENT_SECRET}",
++      "publicClient": false,
++      "bearerOnly": false,
++      "standardFlowEnabled": false,
++      "implicitFlowEnabled": false,
++      "directAccessGrantsEnabled": false,
++      "serviceAccountsEnabled": true,
++      "fullScopeAllowed": false,
++      "defaultClientScopes": [
++        "orders-api"
++      ],
++      "protocolMappers": [
++        {
++          "name": "realm roles",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-usermodel-realm-role-mapper",
++          "consentRequired": false,
++          "config": {
++            "multivalued": "true",
++            "access.token.claim": "true",
++            "id.token.claim": "false",
++            "introspection.token.claim": "true",
++            "claim.name": "realm_access.roles",
++            "jsonType.label": "String"
++          }
++        }
++      ]
++    },
++    {
++      "clientId": "inventory-demo",
++      "name": "Inventory demo service account",
++      "enabled": true,
++      "protocol": "openid-connect",
++      "clientAuthenticatorType": "client-secret",
++      "secret": "${INVENTORY_DEMO_CLIENT_SECRET}",
++      "publicClient": false,
++      "bearerOnly": false,
++      "standardFlowEnabled": false,
++      "implicitFlowEnabled": false,
++      "directAccessGrantsEnabled": false,
++      "serviceAccountsEnabled": true,
++      "fullScopeAllowed": false,
++      "defaultClientScopes": [
++        "inventory-api"
++      ],
++      "protocolMappers": [
++        {
++          "name": "realm roles",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-usermodel-realm-role-mapper",
++          "consentRequired": false,
++          "config": {
++            "multivalued": "true",
++            "access.token.claim": "true",
++            "id.token.claim": "false",
++            "introspection.token.claim": "true",
++            "claim.name": "realm_access.roles",
++            "jsonType.label": "String"
++          }
++        }
++      ]
++    },
++    {
++      "clientId": "monitoring",
++      "name": "Monitoring service account",
++      "enabled": true,
++      "protocol": "openid-connect",
++      "clientAuthenticatorType": "client-secret",
++      "secret": "${MONITORING_CLIENT_SECRET}",
++      "publicClient": false,
++      "bearerOnly": false,
++      "standardFlowEnabled": false,
++      "implicitFlowEnabled": false,
++      "directAccessGrantsEnabled": false,
++      "serviceAccountsEnabled": true,
++      "fullScopeAllowed": false,
++      "defaultClientScopes": [
++        "orders-api",
++        "inventory-api",
++        "metrics.read"
++      ]
++    }
++  ],
++  "scopeMappings": [
++    {
++      "client": "reservation-swagger",
++      "roles": [
++        "CUSTOMER",
++        "INVENTORY_ADMIN"
++      ]
++    },
++    {
++      "client": "orders-demo",
++      "roles": [
++        "CUSTOMER"
++      ]
++    },
++    {
++      "client": "inventory-demo",
++      "roles": [
++        "INVENTORY_ADMIN"
++      ]
++    }
++  ]
++}
+diff --git a/inventory-service/pom.xml b/inventory-service/pom.xml
+index 0ce8bf1..7a6d37a 100644
+--- a/inventory-service/pom.xml
++++ b/inventory-service/pom.xml
+@@ -19,39 +19,53 @@
+             <version>${project.version}</version>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-webmvc</artifactId>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-validation</artifactId>
+         </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
++        </dependency>
+         <dependency>
+             <groupId>org.springdoc</groupId>
+             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+             <version>${springdoc.version}</version>
+         </dependency>
+         <dependency>
+             <groupId>org.jspecify</groupId>
+             <artifactId>jspecify</artifactId>
+         </dependency>
+         <dependency>
+             <groupId>jakarta.annotation</groupId>
+             <artifactId>jakarta.annotation-api</artifactId>
+             <scope>provided</scope>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-test</artifactId>
+             <scope>test</scope>
+         </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-webmvc-test</artifactId>
++            <scope>test</scope>
++        </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-security-oauth2-resource-server-test</artifactId>
++            <scope>test</scope>
++        </dependency>
+     </dependencies>
+ 
+     <build>
+         <plugins>
+             <plugin>
+                 <groupId>org.apache.maven.plugins</groupId>
+                 <artifactId>maven-dependency-plugin</artifactId>
+                 <version>${maven-dependency-plugin.version}</version>
+                 <executions>
+                     <execution>
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/security/RealmRoleConverter.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/security/RealmRoleConverter.java
+new file mode 100644
+index 0000000..83e118b
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/security/RealmRoleConverter.java
+@@ -0,0 +1,36 @@
++package io.github.tmejs.reservation.inventory.security;
++
++import java.util.Collection;
++import java.util.LinkedHashSet;
++import java.util.Map;
++import java.util.Set;
++import org.springframework.core.convert.converter.Converter;
++import org.springframework.security.core.GrantedAuthority;
++import org.springframework.security.core.authority.SimpleGrantedAuthority;
++import org.springframework.security.oauth2.jwt.Jwt;
++import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
++import org.springframework.stereotype.Component;
++
++@Component
++public final class RealmRoleConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
++
++    private static final Set<String> ALLOWED_REALM_ROLES = Set.of("CUSTOMER", "INVENTORY_ADMIN");
++
++    private final JwtGrantedAuthoritiesConverter scopeAuthorities = new JwtGrantedAuthoritiesConverter();
++
++    @Override
++    public Collection<GrantedAuthority> convert(Jwt jwt) {
++        var authorities = new LinkedHashSet<GrantedAuthority>(scopeAuthorities.convert(jwt));
++        Map<String, Object> realmAccess = jwt.getClaimAsMap("realm_access");
++        if (realmAccess == null || !(realmAccess.get("roles") instanceof Collection<?> roles)) {
++            return authorities;
++        }
++        roles.stream()
++                .filter(String.class::isInstance)
++                .map(String.class::cast)
++                .filter(ALLOWED_REALM_ROLES::contains)
++                .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
++                .forEach(authorities::add);
++        return authorities;
++    }
++}
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/security/SecurityConfiguration.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/security/SecurityConfiguration.java
+new file mode 100644
+index 0000000..fd09f1b
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/security/SecurityConfiguration.java
+@@ -0,0 +1,49 @@
++package io.github.tmejs.reservation.inventory.security;
++
++import jakarta.servlet.DispatcherType;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.http.HttpMethod;
++import org.springframework.security.config.annotation.web.builders.HttpSecurity;
++import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
++import org.springframework.security.config.http.SessionCreationPolicy;
++import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
++import org.springframework.security.web.SecurityFilterChain;
++
++@Configuration(proxyBeanMethods = false)
++public class SecurityConfiguration {
++
++    @Bean
++    SecurityFilterChain securityFilterChain(HttpSecurity http, RealmRoleConverter realmRoleConverter) throws Exception {
++        var jwtAuthenticationConverter = new JwtAuthenticationConverter();
++        jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(realmRoleConverter);
++
++        http
++                .csrf(AbstractHttpConfigurer::disable)
++                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
++                .authorizeHttpRequests(authorize -> authorize
++                        .dispatcherTypeMatchers(DispatcherType.ERROR)
++                        .permitAll()
++                        .requestMatchers(
++                                "/openapi/**",
++                                "/swagger-ui/**",
++                                "/swagger-ui.html",
++                                "/v3/api-docs",
++                                "/v3/api-docs/**",
++                                "/actuator/health",
++                                "/actuator/health/**")
++                        .permitAll()
++                        .requestMatchers("/actuator/prometheus")
++                        .hasAuthority("SCOPE_metrics.read")
++                        .requestMatchers(HttpMethod.POST, "/products", "/products/", "/products/*/stock")
++                        .hasRole("INVENTORY_ADMIN")
++                        .requestMatchers(HttpMethod.GET, "/products", "/products/", "/products/**")
++                        .hasAnyRole("CUSTOMER", "INVENTORY_ADMIN")
++                        .anyRequest()
++                        .denyAll())
++                .oauth2ResourceServer(resourceServer -> resourceServer
++                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));
++
++        return http.build();
++    }
++}
+diff --git a/inventory-service/src/main/resources/application.yaml b/inventory-service/src/main/resources/application.yaml
+index f471897..2ff9b96 100644
+--- a/inventory-service/src/main/resources/application.yaml
++++ b/inventory-service/src/main/resources/application.yaml
+@@ -1,13 +1,20 @@
+ spring:
+   application:
+     name: inventory-service
++  security:
++    oauth2:
++      resourceserver:
++        jwt:
++          issuer-uri: ${SECURITY_ISSUER_URI:http://localhost:8180/realms/reservation}
++          jwk-set-uri: ${SECURITY_JWK_SET_URI:http://localhost:8180/realms/reservation/protocol/openid-connect/certs}
++          audiences: inventory-api
+ 
+ server:
+   port: 8081
+ 
+ springdoc:
+   api-docs:
+     enabled: false
+   swagger-ui:
+     url: /openapi/inventory.yaml
+     disable-swagger-default-url: true
+diff --git a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/AuthorizationTest.java b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/AuthorizationTest.java
+new file mode 100644
+index 0000000..d63f827
+--- /dev/null
++++ b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/AuthorizationTest.java
+@@ -0,0 +1,150 @@
++package io.github.tmejs.reservation.inventory.security;
++
++import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
++import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
++import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
++import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
++
++import java.util.List;
++import java.util.Map;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.context.SpringBootTest;
++import org.springframework.boot.test.context.TestConfiguration;
++import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
++import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Import;
++import org.springframework.security.oauth2.jwt.JwtDecoder;
++import org.springframework.test.web.servlet.MockMvc;
++import org.springframework.test.web.servlet.request.RequestPostProcessor;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PostMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++@SpringBootTest
++@AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
++@Import(AuthorizationTest.FixtureConfiguration.class)
++class AuthorizationTest {
++
++    @Autowired
++    private MockMvc mockMvc;
++
++    @Autowired
++    private RealmRoleConverter authoritiesConverter;
++
++    @Test
++    void rejectsMissingToken() throws Exception {
++        mockMvc.perform(get("/products"))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void customerCanReadProductsButCannotMutateStock() throws Exception {
++        var customer = token("alice-subject", List.of("CUSTOMER"), "inventory-api");
++
++        mockMvc.perform(get("/products").with(customer)).andExpect(status().isOk());
++        mockMvc.perform(get("/products/00000000-0000-0000-0000-000000000001")
++                        .with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
++                .andExpect(status().isOk());
++        mockMvc.perform(post("/products").with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
++                .andExpect(status().isForbidden());
++        mockMvc.perform(post("/products/00000000-0000-0000-0000-000000000001/stock")
++                        .with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
++                .andExpect(status().isForbidden());
++    }
++
++    @Test
++    void inventoryAdministratorCanReadAndMutateProducts() throws Exception {
++        mockMvc.perform(get("/products")
++                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api")))
++                .andExpect(status().isOk());
++        mockMvc.perform(post("/products")
++                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api")))
++                .andExpect(status().isOk());
++        mockMvc.perform(post("/products/00000000-0000-0000-0000-000000000001/stock")
++                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api")))
++                .andExpect(status().isOk());
++    }
++
++    @Test
++    void monitoringScopeCanUseMetricsButNotBusinessRoutes() throws Exception {
++        mockMvc.perform(get("/actuator/prometheus")
++                        .with(token("monitoring", List.of(), "inventory-api metrics.read")))
++                .andExpect(status().isOk());
++        mockMvc.perform(get("/products")
++                        .with(token("monitoring", List.of(), "inventory-api metrics.read")))
++                .andExpect(status().isForbidden());
++    }
++
++    @Test
++    void customerCannotUseMetricsAndUnmatchedRoutesAreDenied() throws Exception {
++        mockMvc.perform(get("/actuator/prometheus")
++                        .with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
++                .andExpect(status().isForbidden());
++        mockMvc.perform(get("/unmatched")
++                        .with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
++                .andExpect(status().isForbidden());
++    }
++
++    @Test
++    void swaggerSpecAndHealthArePublic() throws Exception {
++        mockMvc.perform(get("/openapi/inventory.yaml")).andExpect(status().isOk());
++        mockMvc.perform(get("/swagger-ui/index.html")).andExpect(status().isOk());
++        mockMvc.perform(get("/v3/api-docs/swagger-config")).andExpect(status().isOk());
++        mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
++    }
++
++    private RequestPostProcessor token(String subject, List<String> roles, String scope) {
++        return jwt()
++                .jwt(jwt -> jwt.subject(subject)
++                        .claim("scope", scope)
++                        .claim("realm_access", Map.of("roles", roles)))
++                .authorities(authoritiesConverter);
++    }
++
++    @TestConfiguration(proxyBeanMethods = false)
++    static class FixtureConfiguration {
++
++        @Bean
++        JwtDecoder jwtDecoder() {
++            return token -> {
++                throw new IllegalArgumentException("Encoded JWT decoding is not used by this policy test");
++            };
++        }
++
++        @Bean
++        FixtureEndpoints fixtureEndpoints() {
++            return new FixtureEndpoints();
++        }
++    }
++
++    @RestController
++    static class FixtureEndpoints {
++
++        @GetMapping({"/products", "/products/{id}"})
++        String readProduct() {
++            return "product";
++        }
++
++        @PostMapping({"/products", "/products/{id}/stock"})
++        String mutateProduct() {
++            return "mutated";
++        }
++
++        @GetMapping("/actuator/prometheus")
++        String metrics() {
++            return "metrics";
++        }
++
++        @GetMapping("/actuator/health")
++        String health() {
++            return "up";
++        }
++
++        @GetMapping("/unmatched")
++        String unmatched() {
++            return "denied";
++        }
++    }
++}
+diff --git a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/JwtValidationIT.java b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/JwtValidationIT.java
+new file mode 100644
+index 0000000..91d58d0
+--- /dev/null
++++ b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/JwtValidationIT.java
+@@ -0,0 +1,205 @@
++package io.github.tmejs.reservation.inventory.security;
++
++import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
++import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
++
++import com.nimbusds.jose.jwk.JWKSet;
++import com.nimbusds.jose.jwk.RSAKey;
++import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
++import com.nimbusds.jose.proc.SecurityContext;
++import com.sun.net.httpserver.HttpServer;
++import java.io.IOException;
++import java.net.InetAddress;
++import java.net.InetSocketAddress;
++import java.nio.charset.StandardCharsets;
++import java.security.KeyPair;
++import java.security.KeyPairGenerator;
++import java.security.interfaces.RSAPrivateKey;
++import java.security.interfaces.RSAPublicKey;
++import java.time.Instant;
++import java.util.List;
++import java.util.Map;
++import org.junit.jupiter.api.AfterAll;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.context.SpringBootTest;
++import org.springframework.boot.test.context.TestConfiguration;
++import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
++import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Import;
++import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
++import org.springframework.security.oauth2.jwt.JwtClaimsSet;
++import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
++import org.springframework.security.oauth2.jwt.JwsHeader;
++import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
++import org.springframework.test.context.DynamicPropertyRegistry;
++import org.springframework.test.context.DynamicPropertySource;
++import org.springframework.test.web.servlet.MockMvc;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++@SpringBootTest
++@AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
++@Import(JwtValidationIT.FixtureConfiguration.class)
++class JwtValidationIT {
++
++    private static final String KEY_ID = "inventory-test-key";
++    private static final String ISSUER = "https://issuer.example/realms/reservation";
++    private static final String AUDIENCE = "inventory-api";
++    private static final KeyPair SIGNING_KEY = generateKeyPair();
++    private static final KeyPair WRONG_KEY = generateKeyPair();
++    private static final HttpServer JWKS_SERVER = startJwksServer();
++
++    @Autowired
++    private MockMvc mockMvc;
++
++    @DynamicPropertySource
++    static void jwtProperties(DynamicPropertyRegistry registry) {
++        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> ISSUER);
++        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", () ->
++                "http://" + JWKS_SERVER.getAddress().getHostString() + ":" + JWKS_SERVER.getAddress().getPort() + "/jwks");
++    }
++
++    @AfterAll
++    static void stopJwksServer() {
++        JWKS_SERVER.stop(0);
++    }
++
++    @Test
++    void acceptsValidToken() throws Exception {
++        mockMvc.perform(get("/products/validation").header("Authorization", "Bearer " + token(TokenClaims.valid(), SIGNING_KEY)))
++                .andExpect(status().isOk());
++    }
++
++    @Test
++    void rejectsTokenSignedByDifferentKey() throws Exception {
++        mockMvc.perform(get("/products/validation").header("Authorization", "Bearer " + token(TokenClaims.valid(), WRONG_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void rejectsWrongIssuer() throws Exception {
++        mockMvc.perform(get("/products/validation").header("Authorization", "Bearer "
++                        + token(TokenClaims.valid().withIssuer("https://wrong.example/realms/reservation"), SIGNING_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void rejectsWrongAudience() throws Exception {
++        mockMvc.perform(get("/products/validation").header("Authorization", "Bearer "
++                        + token(TokenClaims.valid().withAudience(List.of("orders-api")), SIGNING_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void rejectsMissingAudience() throws Exception {
++        mockMvc.perform(get("/products/validation").header("Authorization", "Bearer "
++                        + token(TokenClaims.valid().withAudience(List.of()), SIGNING_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void rejectsExpiredToken() throws Exception {
++        var now = Instant.now();
++        mockMvc.perform(get("/products/validation").header("Authorization", "Bearer "
++                        + token(TokenClaims.valid().withTimes(now.minusSeconds(600), now.minusSeconds(300)), SIGNING_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void rejectsFutureNotBefore() throws Exception {
++        var now = Instant.now();
++        mockMvc.perform(get("/products/validation").header("Authorization", "Bearer "
++                        + token(TokenClaims.valid().withTimes(now.plusSeconds(600), now.plusSeconds(900)), SIGNING_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    private static String token(TokenClaims tokenClaims, KeyPair keyPair) {
++        var rsaKey = new RSAKey.Builder((RSAPublicKey) keyPair.getPublic())
++                .privateKey((RSAPrivateKey) keyPair.getPrivate())
++                .keyID(KEY_ID)
++                .build();
++        var encoder = new NimbusJwtEncoder(new ImmutableJWKSet<SecurityContext>(new JWKSet(rsaKey)));
++        var claims = JwtClaimsSet.builder()
++                .issuer(tokenClaims.issuer())
++                .subject("alice-subject")
++                .audience(tokenClaims.audience())
++                .issuedAt(tokenClaims.expiresAt().isBefore(Instant.now())
++                        ? tokenClaims.expiresAt().minusSeconds(300)
++                        : Instant.now().minusSeconds(5))
++                .notBefore(tokenClaims.notBefore())
++                .expiresAt(tokenClaims.expiresAt())
++                .claim("scope", AUDIENCE)
++                .claim("realm_access", Map.of("roles", List.of("CUSTOMER")))
++                .build();
++        var header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(KEY_ID).build();
++        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
++    }
++
++    private static KeyPair generateKeyPair() {
++        try {
++            var generator = KeyPairGenerator.getInstance("RSA");
++            generator.initialize(2048);
++            return generator.generateKeyPair();
++        } catch (Exception exception) {
++            throw new IllegalStateException("Cannot generate JWT test key", exception);
++        }
++    }
++
++    private static HttpServer startJwksServer() {
++        try {
++            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
++            var publicKey = new RSAKey.Builder((RSAPublicKey) SIGNING_KEY.getPublic()).keyID(KEY_ID).build();
++            var body = new JWKSet(publicKey).toString().getBytes(StandardCharsets.UTF_8);
++            server.createContext("/jwks", exchange -> {
++                exchange.getResponseHeaders().add("Content-Type", "application/json");
++                exchange.sendResponseHeaders(200, body.length);
++                exchange.getResponseBody().write(body);
++                exchange.close();
++            });
++            server.start();
++            return server;
++        } catch (IOException exception) {
++            throw new IllegalStateException("Cannot start JWKS test server", exception);
++        }
++    }
++
++    private record TokenClaims(String issuer, List<String> audience, Instant notBefore, Instant expiresAt) {
++
++        static TokenClaims valid() {
++            var now = Instant.now();
++            return new TokenClaims(ISSUER, List.of(AUDIENCE), now.minusSeconds(5), now.plusSeconds(300));
++        }
++
++        TokenClaims withIssuer(String newIssuer) {
++            return new TokenClaims(newIssuer, audience, notBefore, expiresAt);
++        }
++
++        TokenClaims withAudience(List<String> newAudience) {
++            return new TokenClaims(issuer, newAudience, notBefore, expiresAt);
++        }
++
++        TokenClaims withTimes(Instant newNotBefore, Instant newExpiresAt) {
++            return new TokenClaims(issuer, audience, newNotBefore, newExpiresAt);
++        }
++    }
++
++    @TestConfiguration(proxyBeanMethods = false)
++    static class FixtureConfiguration {
++
++        @Bean
++        ValidationEndpoint validationEndpoint() {
++            return new ValidationEndpoint();
++        }
++    }
++
++    @RestController
++    static class ValidationEndpoint {
++
++        @GetMapping("/products/validation")
++        String validate() {
++            return "validated";
++        }
++    }
++}
+diff --git a/order-service/pom.xml b/order-service/pom.xml
+index 83359e3..f178540 100644
+--- a/order-service/pom.xml
++++ b/order-service/pom.xml
+@@ -19,39 +19,58 @@
+             <version>${project.version}</version>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-webmvc</artifactId>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-validation</artifactId>
+         </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
++        </dependency>
+         <dependency>
+             <groupId>org.springdoc</groupId>
+             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+             <version>${springdoc.version}</version>
+         </dependency>
+         <dependency>
+             <groupId>org.jspecify</groupId>
+             <artifactId>jspecify</artifactId>
+         </dependency>
+         <dependency>
+             <groupId>jakarta.annotation</groupId>
+             <artifactId>jakarta.annotation-api</artifactId>
+             <scope>provided</scope>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-test</artifactId>
+             <scope>test</scope>
+         </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-webmvc-test</artifactId>
++            <scope>test</scope>
++        </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-security-oauth2-resource-server-test</artifactId>
++            <scope>test</scope>
++        </dependency>
++        <dependency>
++            <groupId>org.testcontainers</groupId>
++            <artifactId>testcontainers</artifactId>
++            <scope>test</scope>
++        </dependency>
+     </dependencies>
+ 
+     <build>
+         <plugins>
+             <plugin>
+                 <groupId>org.apache.maven.plugins</groupId>
+                 <artifactId>maven-dependency-plugin</artifactId>
+                 <version>${maven-dependency-plugin.version}</version>
+                 <executions>
+                     <execution>
+@@ -122,20 +141,23 @@
+                             </configOptions>
+                         </configuration>
+                     </execution>
+                 </executions>
+             </plugin>
+             <plugin>
+                 <groupId>org.apache.maven.plugins</groupId>
+                 <artifactId>maven-failsafe-plugin</artifactId>
+                 <configuration>
+                     <classesDirectory>${project.build.outputDirectory}</classesDirectory>
++                    <systemPropertyVariables>
++                        <projectRoot>${maven.multiModuleProjectDirectory}</projectRoot>
++                    </systemPropertyVariables>
+                 </configuration>
+             </plugin>
+             <plugin>
+                 <groupId>org.springframework.boot</groupId>
+                 <artifactId>spring-boot-maven-plugin</artifactId>
+                 <executions>
+                     <execution>
+                         <goals>
+                             <goal>repackage</goal>
+                         </goals>
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/security/CurrentOwner.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/security/CurrentOwner.java
+new file mode 100644
+index 0000000..27cb463
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/security/CurrentOwner.java
+@@ -0,0 +1,17 @@
++package io.github.tmejs.reservation.orders.security;
++
++import org.springframework.security.core.context.SecurityContextHolder;
++import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
++import org.springframework.stereotype.Component;
++
++@Component
++public final class CurrentOwner {
++
++    public String subject() {
++        var authentication = SecurityContextHolder.getContext().getAuthentication();
++        if (authentication instanceof JwtAuthenticationToken jwtAuthentication && authentication.isAuthenticated()) {
++            return jwtAuthentication.getToken().getSubject();
++        }
++        throw new IllegalStateException("An authenticated JWT principal is required");
++    }
++}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/security/RealmRoleConverter.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/security/RealmRoleConverter.java
+new file mode 100644
+index 0000000..92ca31d
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/security/RealmRoleConverter.java
+@@ -0,0 +1,36 @@
++package io.github.tmejs.reservation.orders.security;
++
++import java.util.Collection;
++import java.util.LinkedHashSet;
++import java.util.Map;
++import java.util.Set;
++import org.springframework.core.convert.converter.Converter;
++import org.springframework.security.core.GrantedAuthority;
++import org.springframework.security.core.authority.SimpleGrantedAuthority;
++import org.springframework.security.oauth2.jwt.Jwt;
++import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
++import org.springframework.stereotype.Component;
++
++@Component
++public final class RealmRoleConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
++
++    private static final Set<String> ALLOWED_REALM_ROLES = Set.of("CUSTOMER", "INVENTORY_ADMIN");
++
++    private final JwtGrantedAuthoritiesConverter scopeAuthorities = new JwtGrantedAuthoritiesConverter();
++
++    @Override
++    public Collection<GrantedAuthority> convert(Jwt jwt) {
++        var authorities = new LinkedHashSet<GrantedAuthority>(scopeAuthorities.convert(jwt));
++        Map<String, Object> realmAccess = jwt.getClaimAsMap("realm_access");
++        if (realmAccess == null || !(realmAccess.get("roles") instanceof Collection<?> roles)) {
++            return authorities;
++        }
++        roles.stream()
++                .filter(String.class::isInstance)
++                .map(String.class::cast)
++                .filter(ALLOWED_REALM_ROLES::contains)
++                .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
++                .forEach(authorities::add);
++        return authorities;
++    }
++}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/security/SecurityConfiguration.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/security/SecurityConfiguration.java
+new file mode 100644
+index 0000000..c1e2b96
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/security/SecurityConfiguration.java
+@@ -0,0 +1,49 @@
++package io.github.tmejs.reservation.orders.security;
++
++import jakarta.servlet.DispatcherType;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.http.HttpMethod;
++import org.springframework.security.config.annotation.web.builders.HttpSecurity;
++import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
++import org.springframework.security.config.http.SessionCreationPolicy;
++import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
++import org.springframework.security.web.SecurityFilterChain;
++
++@Configuration(proxyBeanMethods = false)
++public class SecurityConfiguration {
++
++    @Bean
++    SecurityFilterChain securityFilterChain(HttpSecurity http, RealmRoleConverter realmRoleConverter) throws Exception {
++        var jwtAuthenticationConverter = new JwtAuthenticationConverter();
++        jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(realmRoleConverter);
++
++        http
++                .csrf(AbstractHttpConfigurer::disable)
++                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
++                .authorizeHttpRequests(authorize -> authorize
++                        .dispatcherTypeMatchers(DispatcherType.ERROR)
++                        .permitAll()
++                        .requestMatchers(
++                                "/openapi/**",
++                                "/swagger-ui/**",
++                                "/swagger-ui.html",
++                                "/v3/api-docs",
++                                "/v3/api-docs/**",
++                                "/actuator/health",
++                                "/actuator/health/**")
++                        .permitAll()
++                        .requestMatchers("/actuator/prometheus")
++                        .hasAuthority("SCOPE_metrics.read")
++                        .requestMatchers(HttpMethod.POST, "/orders", "/orders/")
++                        .hasRole("CUSTOMER")
++                        .requestMatchers(HttpMethod.GET, "/orders/**")
++                        .hasRole("CUSTOMER")
++                        .anyRequest()
++                        .denyAll())
++                .oauth2ResourceServer(resourceServer -> resourceServer
++                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));
++
++        return http.build();
++    }
++}
+diff --git a/order-service/src/main/resources/application.yaml b/order-service/src/main/resources/application.yaml
+index 069592b..f93c999 100644
+--- a/order-service/src/main/resources/application.yaml
++++ b/order-service/src/main/resources/application.yaml
+@@ -1,13 +1,20 @@
+ spring:
+   application:
+     name: order-service
++  security:
++    oauth2:
++      resourceserver:
++        jwt:
++          issuer-uri: ${SECURITY_ISSUER_URI:http://localhost:8180/realms/reservation}
++          jwk-set-uri: ${SECURITY_JWK_SET_URI:http://localhost:8180/realms/reservation/protocol/openid-connect/certs}
++          audiences: orders-api
+ 
+ server:
+   port: 8080
+ 
+ springdoc:
+   api-docs:
+     enabled: false
+   swagger-ui:
+     url: /openapi/orders.yaml
+     disable-swagger-default-url: true
+diff --git a/order-service/src/test/java/io/github/tmejs/reservation/orders/security/AuthorizationTest.java b/order-service/src/test/java/io/github/tmejs/reservation/orders/security/AuthorizationTest.java
+new file mode 100644
+index 0000000..9b9ba4d
+--- /dev/null
++++ b/order-service/src/test/java/io/github/tmejs/reservation/orders/security/AuthorizationTest.java
+@@ -0,0 +1,147 @@
++package io.github.tmejs.reservation.orders.security;
++
++import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
++import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
++import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
++import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
++import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
++
++import java.util.List;
++import java.util.Map;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.context.SpringBootTest;
++import org.springframework.boot.test.context.TestConfiguration;
++import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
++import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Import;
++import org.springframework.security.oauth2.jwt.JwtDecoder;
++import org.springframework.test.web.servlet.MockMvc;
++import org.springframework.test.web.servlet.request.RequestPostProcessor;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PostMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++@SpringBootTest
++@AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
++@Import(AuthorizationTest.FixtureConfiguration.class)
++class AuthorizationTest {
++
++    @Autowired
++    private MockMvc mockMvc;
++
++    @Autowired
++    private RealmRoleConverter authoritiesConverter;
++
++    @Test
++    void rejectsMissingToken() throws Exception {
++        mockMvc.perform(post("/orders"))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void customerCanUseOrdersAndSubjectComesFromJwt() throws Exception {
++        mockMvc.perform(post("/orders").with(token("alice-subject", List.of("CUSTOMER"), "orders-api")))
++                .andExpect(status().isOk());
++
++        mockMvc.perform(get("/orders/00000000-0000-0000-0000-000000000001")
++                        .with(token("alice-subject", List.of("CUSTOMER"), "orders-api")))
++                .andExpect(status().isOk())
++                .andExpect(content().string("alice-subject"));
++    }
++
++    @Test
++    void inventoryAdministratorCannotUseOrders() throws Exception {
++        mockMvc.perform(post("/orders")
++                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "orders-api")))
++                .andExpect(status().isForbidden());
++    }
++
++    @Test
++    void monitoringScopeCanUseMetricsButNotOrders() throws Exception {
++        var monitoring = token("monitoring", List.of(), "orders-api metrics.read");
++
++        mockMvc.perform(get("/actuator/prometheus").with(monitoring))
++                .andExpect(status().isOk());
++        mockMvc.perform(post("/orders").with(token("monitoring", List.of(), "orders-api metrics.read")))
++                .andExpect(status().isForbidden());
++    }
++
++    @Test
++    void customerCannotUseMetricsAndUnmatchedRoutesAreDenied() throws Exception {
++        mockMvc.perform(get("/actuator/prometheus")
++                        .with(token("alice-subject", List.of("CUSTOMER"), "orders-api")))
++                .andExpect(status().isForbidden());
++        mockMvc.perform(get("/unmatched")
++                        .with(token("alice-subject", List.of("CUSTOMER"), "orders-api")))
++                .andExpect(status().isForbidden());
++    }
++
++    @Test
++    void swaggerSpecAndHealthArePublic() throws Exception {
++        mockMvc.perform(get("/openapi/orders.yaml")).andExpect(status().isOk());
++        mockMvc.perform(get("/swagger-ui/index.html")).andExpect(status().isOk());
++        mockMvc.perform(get("/v3/api-docs/swagger-config")).andExpect(status().isOk());
++        mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
++    }
++
++    private RequestPostProcessor token(String subject, List<String> roles, String scope) {
++        return jwt()
++                .jwt(jwt -> jwt.subject(subject)
++                        .claim("scope", scope)
++                        .claim("realm_access", Map.of("roles", roles)))
++                .authorities(authoritiesConverter);
++    }
++
++    @TestConfiguration(proxyBeanMethods = false)
++    static class FixtureConfiguration {
++
++        @Bean
++        JwtDecoder jwtDecoder() {
++            return token -> {
++                throw new IllegalArgumentException("Encoded JWT decoding is not used by this policy test");
++            };
++        }
++
++        @Bean
++        FixtureEndpoints fixtureEndpoints(CurrentOwner currentOwner) {
++            return new FixtureEndpoints(currentOwner);
++        }
++    }
++
++    @RestController
++    static class FixtureEndpoints {
++
++        private final CurrentOwner currentOwner;
++
++        FixtureEndpoints(CurrentOwner currentOwner) {
++            this.currentOwner = currentOwner;
++        }
++
++        @PostMapping("/orders")
++        String createOrder() {
++            return "created";
++        }
++
++        @GetMapping("/orders/{id}")
++        String getOrder() {
++            return currentOwner.subject();
++        }
++
++        @GetMapping("/actuator/prometheus")
++        String metrics() {
++            return "metrics";
++        }
++
++        @GetMapping("/actuator/health")
++        String health() {
++            return "up";
++        }
++
++        @GetMapping("/unmatched")
++        String unmatched() {
++            return "denied";
++        }
++    }
++}
+diff --git a/order-service/src/test/java/io/github/tmejs/reservation/orders/security/JwtValidationIT.java b/order-service/src/test/java/io/github/tmejs/reservation/orders/security/JwtValidationIT.java
+new file mode 100644
+index 0000000..270b13f
+--- /dev/null
++++ b/order-service/src/test/java/io/github/tmejs/reservation/orders/security/JwtValidationIT.java
+@@ -0,0 +1,205 @@
++package io.github.tmejs.reservation.orders.security;
++
++import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
++import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
++
++import com.nimbusds.jose.jwk.JWKSet;
++import com.nimbusds.jose.jwk.RSAKey;
++import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
++import com.nimbusds.jose.proc.SecurityContext;
++import com.sun.net.httpserver.HttpServer;
++import java.io.IOException;
++import java.net.InetAddress;
++import java.net.InetSocketAddress;
++import java.nio.charset.StandardCharsets;
++import java.security.KeyPair;
++import java.security.KeyPairGenerator;
++import java.security.interfaces.RSAPrivateKey;
++import java.security.interfaces.RSAPublicKey;
++import java.time.Instant;
++import java.util.List;
++import java.util.Map;
++import org.junit.jupiter.api.AfterAll;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.context.SpringBootTest;
++import org.springframework.boot.test.context.TestConfiguration;
++import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
++import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Import;
++import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
++import org.springframework.security.oauth2.jwt.JwtClaimsSet;
++import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
++import org.springframework.security.oauth2.jwt.JwsHeader;
++import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
++import org.springframework.test.context.DynamicPropertyRegistry;
++import org.springframework.test.context.DynamicPropertySource;
++import org.springframework.test.web.servlet.MockMvc;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++@SpringBootTest
++@AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
++@Import(JwtValidationIT.FixtureConfiguration.class)
++class JwtValidationIT {
++
++    private static final String KEY_ID = "orders-test-key";
++    private static final String ISSUER = "https://issuer.example/realms/reservation";
++    private static final String AUDIENCE = "orders-api";
++    private static final KeyPair SIGNING_KEY = generateKeyPair();
++    private static final KeyPair WRONG_KEY = generateKeyPair();
++    private static final HttpServer JWKS_SERVER = startJwksServer();
++
++    @Autowired
++    private MockMvc mockMvc;
++
++    @DynamicPropertySource
++    static void jwtProperties(DynamicPropertyRegistry registry) {
++        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> ISSUER);
++        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", () ->
++                "http://" + JWKS_SERVER.getAddress().getHostString() + ":" + JWKS_SERVER.getAddress().getPort() + "/jwks");
++    }
++
++    @AfterAll
++    static void stopJwksServer() {
++        JWKS_SERVER.stop(0);
++    }
++
++    @Test
++    void acceptsValidToken() throws Exception {
++        mockMvc.perform(get("/orders/validation").header("Authorization", "Bearer " + token(TokenClaims.valid(), SIGNING_KEY)))
++                .andExpect(status().isOk());
++    }
++
++    @Test
++    void rejectsTokenSignedByDifferentKey() throws Exception {
++        mockMvc.perform(get("/orders/validation").header("Authorization", "Bearer " + token(TokenClaims.valid(), WRONG_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void rejectsWrongIssuer() throws Exception {
++        mockMvc.perform(get("/orders/validation").header("Authorization", "Bearer "
++                        + token(TokenClaims.valid().withIssuer("https://wrong.example/realms/reservation"), SIGNING_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void rejectsWrongAudience() throws Exception {
++        mockMvc.perform(get("/orders/validation").header("Authorization", "Bearer "
++                        + token(TokenClaims.valid().withAudience(List.of("inventory-api")), SIGNING_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void rejectsMissingAudience() throws Exception {
++        mockMvc.perform(get("/orders/validation").header("Authorization", "Bearer "
++                        + token(TokenClaims.valid().withAudience(List.of()), SIGNING_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void rejectsExpiredToken() throws Exception {
++        var now = Instant.now();
++        mockMvc.perform(get("/orders/validation").header("Authorization", "Bearer "
++                        + token(TokenClaims.valid().withTimes(now.minusSeconds(600), now.minusSeconds(300)), SIGNING_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    @Test
++    void rejectsFutureNotBefore() throws Exception {
++        var now = Instant.now();
++        mockMvc.perform(get("/orders/validation").header("Authorization", "Bearer "
++                        + token(TokenClaims.valid().withTimes(now.plusSeconds(600), now.plusSeconds(900)), SIGNING_KEY)))
++                .andExpect(status().isUnauthorized());
++    }
++
++    private static String token(TokenClaims tokenClaims, KeyPair keyPair) {
++        var rsaKey = new RSAKey.Builder((RSAPublicKey) keyPair.getPublic())
++                .privateKey((RSAPrivateKey) keyPair.getPrivate())
++                .keyID(KEY_ID)
++                .build();
++        var encoder = new NimbusJwtEncoder(new ImmutableJWKSet<SecurityContext>(new JWKSet(rsaKey)));
++        var claims = JwtClaimsSet.builder()
++                .issuer(tokenClaims.issuer())
++                .subject("alice-subject")
++                .audience(tokenClaims.audience())
++                .issuedAt(tokenClaims.expiresAt().isBefore(Instant.now())
++                        ? tokenClaims.expiresAt().minusSeconds(300)
++                        : Instant.now().minusSeconds(5))
++                .notBefore(tokenClaims.notBefore())
++                .expiresAt(tokenClaims.expiresAt())
++                .claim("scope", AUDIENCE)
++                .claim("realm_access", Map.of("roles", List.of("CUSTOMER")))
++                .build();
++        var header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(KEY_ID).build();
++        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
++    }
++
++    private static KeyPair generateKeyPair() {
++        try {
++            var generator = KeyPairGenerator.getInstance("RSA");
++            generator.initialize(2048);
++            return generator.generateKeyPair();
++        } catch (Exception exception) {
++            throw new IllegalStateException("Cannot generate JWT test key", exception);
++        }
++    }
++
++    private static HttpServer startJwksServer() {
++        try {
++            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
++            var publicKey = new RSAKey.Builder((RSAPublicKey) SIGNING_KEY.getPublic()).keyID(KEY_ID).build();
++            var body = new JWKSet(publicKey).toString().getBytes(StandardCharsets.UTF_8);
++            server.createContext("/jwks", exchange -> {
++                exchange.getResponseHeaders().add("Content-Type", "application/json");
++                exchange.sendResponseHeaders(200, body.length);
++                exchange.getResponseBody().write(body);
++                exchange.close();
++            });
++            server.start();
++            return server;
++        } catch (IOException exception) {
++            throw new IllegalStateException("Cannot start JWKS test server", exception);
++        }
++    }
++
++    private record TokenClaims(String issuer, List<String> audience, Instant notBefore, Instant expiresAt) {
++
++        static TokenClaims valid() {
++            var now = Instant.now();
++            return new TokenClaims(ISSUER, List.of(AUDIENCE), now.minusSeconds(5), now.plusSeconds(300));
++        }
++
++        TokenClaims withIssuer(String newIssuer) {
++            return new TokenClaims(newIssuer, audience, notBefore, expiresAt);
++        }
++
++        TokenClaims withAudience(List<String> newAudience) {
++            return new TokenClaims(issuer, newAudience, notBefore, expiresAt);
++        }
++
++        TokenClaims withTimes(Instant newNotBefore, Instant newExpiresAt) {
++            return new TokenClaims(issuer, audience, newNotBefore, newExpiresAt);
++        }
++    }
++
++    @TestConfiguration(proxyBeanMethods = false)
++    static class FixtureConfiguration {
++
++        @Bean
++        ValidationEndpoint validationEndpoint() {
++            return new ValidationEndpoint();
++        }
++    }
++
++    @RestController
++    static class ValidationEndpoint {
++
++        @GetMapping("/orders/validation")
++        String validate() {
++            return "validated";
++        }
++    }
++}
+diff --git a/order-service/src/test/java/io/github/tmejs/reservation/orders/security/KeycloakRealmIT.java b/order-service/src/test/java/io/github/tmejs/reservation/orders/security/KeycloakRealmIT.java
+new file mode 100644
+index 0000000..186876b
+--- /dev/null
++++ b/order-service/src/test/java/io/github/tmejs/reservation/orders/security/KeycloakRealmIT.java
+@@ -0,0 +1,140 @@
++package io.github.tmejs.reservation.orders.security;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++
++import java.net.URI;
++import java.net.URLEncoder;
++import java.net.http.HttpClient;
++import java.net.http.HttpRequest;
++import java.net.http.HttpResponse;
++import java.nio.charset.StandardCharsets;
++import java.nio.file.Path;
++import java.time.Duration;
++import java.util.Arrays;
++import java.util.Collection;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++import java.util.stream.Collectors;
++import org.junit.jupiter.api.Test;
++import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
++import org.springframework.security.oauth2.jwt.Jwt;
++import org.springframework.security.oauth2.jwt.JwtClaimValidator;
++import org.springframework.security.oauth2.jwt.JwtValidationException;
++import org.springframework.security.oauth2.jwt.JwtValidators;
++import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
++import org.testcontainers.containers.GenericContainer;
++import org.testcontainers.containers.wait.strategy.Wait;
++import org.testcontainers.utility.DockerImageName;
++import org.testcontainers.utility.MountableFile;
++import tools.jackson.databind.ObjectMapper;
++
++class KeycloakRealmIT {
++
++    private static final DockerImageName KEYCLOAK_IMAGE =
++            DockerImageName.parse("quay.io/keycloak/keycloak:26.7.4");
++    private static final String ORDERS_SECRET = "test-orders-secret";
++    private static final String INVENTORY_SECRET = "test-inventory-secret";
++    private static final String MONITORING_SECRET = "test-monitoring-secret";
++    private static final Set<String> BUSINESS_ROLES = Set.of("CUSTOMER", "INVENTORY_ADMIN");
++    private static final ObjectMapper JSON = new ObjectMapper();
++
++    @Test
++    void importedRealmIssuesLeastPrivilegeClientCredentialTokens() throws Exception {
++        Path realmJson = Path.of(System.getProperty("projectRoot"), "infra/keycloak/reservation-realm.json");
++
++        try (var keycloak = new GenericContainer<>(KEYCLOAK_IMAGE)
++                .withExposedPorts(8080)
++                .withEnv("ORDERS_DEMO_CLIENT_SECRET", ORDERS_SECRET)
++                .withEnv("INVENTORY_DEMO_CLIENT_SECRET", INVENTORY_SECRET)
++                .withEnv("MONITORING_CLIENT_SECRET", MONITORING_SECRET)
++                .withCopyFileToContainer(
++                        MountableFile.forHostPath(realmJson),
++                        "/opt/keycloak/data/import/reservation-realm.json")
++                .withCommand("start-dev", "--import-realm", "--hostname-strict=false")
++                .waitingFor(Wait.forHttp("/realms/reservation/.well-known/openid-configuration")
++                        .forStatusCode(200)
++                        .withStartupTimeout(Duration.ofMinutes(2)))) {
++            keycloak.start();
++
++            String issuer = "http://" + keycloak.getHost() + ":" + keycloak.getMappedPort(8080)
++                    + "/realms/reservation";
++            Jwt orders = token(issuer, "orders-demo", ORDERS_SECRET);
++            Jwt inventory = token(issuer, "inventory-demo", INVENTORY_SECRET);
++            Jwt monitoring = token(issuer, "monitoring", MONITORING_SECRET);
++
++            assertThat(orders.getAudience()).containsExactly("orders-api");
++            assertThat(scopes(orders)).containsExactly("orders-api");
++            assertThat(allowedRealmRoles(orders)).containsExactly("CUSTOMER");
++
++            assertThat(inventory.getAudience()).containsExactly("inventory-api");
++            assertThat(scopes(inventory)).containsExactly("inventory-api");
++            assertThat(allowedRealmRoles(inventory)).containsExactly("INVENTORY_ADMIN");
++
++            assertThat(monitoring.getAudience()).containsExactlyInAnyOrder("orders-api", "inventory-api");
++            assertThat(scopes(monitoring)).containsExactlyInAnyOrder("orders-api", "inventory-api", "metrics.read");
++            assertThat(allowedRealmRoles(monitoring)).isEmpty();
++
++            var inventoryDecoder = decoder(issuer, "inventory-api");
++            assertThatThrownBy(() -> inventoryDecoder.decode(orders.getTokenValue()))
++                    .isInstanceOf(JwtValidationException.class);
++            var ordersDecoder = decoder(issuer, "orders-api");
++            assertThatThrownBy(() -> ordersDecoder.decode(inventory.getTokenValue()))
++                    .isInstanceOf(JwtValidationException.class);
++        }
++    }
++
++    private static Jwt token(String issuer, String clientId, String secret) throws Exception {
++        String body = "grant_type=client_credentials&client_id=" + encode(clientId) + "&client_secret=" + encode(secret);
++        var request = HttpRequest.newBuilder(URI.create(issuer + "/protocol/openid-connect/token"))
++                .header("Content-Type", "application/x-www-form-urlencoded")
++                .POST(HttpRequest.BodyPublishers.ofString(body))
++                .build();
++        var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
++        assertThat(response.statusCode()).isEqualTo(200);
++        String tokenValue = JSON.readTree(response.body()).get("access_token").asString();
++        return decoder(issuer, expectedAudience(clientId)).decode(tokenValue);
++    }
++
++    private static NimbusJwtDecoder decoder(String issuer, String audience) {
++        var decoder = NimbusJwtDecoder.withJwkSetUri(issuer + "/protocol/openid-connect/certs").build();
++        var issuerValidator = JwtValidators.createDefaultWithIssuer(issuer);
++        var audienceValidator = new JwtClaimValidator<List<String>>("aud", audiences ->
++                audiences != null && audiences.contains(audience));
++        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(issuerValidator, audienceValidator));
++        return decoder;
++    }
++
++    private static String expectedAudience(String clientId) {
++        return switch (clientId) {
++            case "orders-demo" -> "orders-api";
++            case "inventory-demo" -> "inventory-api";
++            case "monitoring" -> "orders-api";
++            default -> throw new IllegalArgumentException("Unknown client");
++        };
++    }
++
++    private static String encode(String value) {
++        return URLEncoder.encode(value, StandardCharsets.UTF_8);
++    }
++
++    private static Set<String> scopes(Jwt jwt) {
++        String scope = jwt.getClaimAsString("scope");
++        return scope == null || scope.isBlank()
++                ? Set.of()
++                : Arrays.stream(scope.split(" ")).collect(Collectors.toSet());
++    }
++
++    private static Set<String> allowedRealmRoles(Jwt jwt) {
++        Map<String, Object> realmAccess = jwt.getClaimAsMap("realm_access");
++        if (realmAccess == null || !(realmAccess.get("roles") instanceof Collection<?> roles)) {
++            return Set.of();
++        }
++        return roles.stream()
++                .filter(String.class::isInstance)
++                .map(String.class::cast)
++                .filter(BUSINESS_ROLES::contains)
++                .collect(Collectors.toSet());
++    }
++}

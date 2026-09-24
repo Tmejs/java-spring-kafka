@@ -8,9 +8,9 @@ claims of delivered functionality. Test names may evolve with implementation.
 | Java25 five-module reactor | 1 | clean Maven verify and executable jar smoke | Locally verified; review passed |
 | Generated interfaces/clients | 2 | clean generation/compilation, no tracked generated Java | Verified |
 | Original OpenAPI/Swagger | 2 | HTTP spec and UI retrieval | Verified: 6 HTTP tests |
-| Real JWT validation | 2a | wrong signature/issuer/audience/time failures | Pending |
-| Realm import | 2a,9 | real Keycloak-issued token accepted | Pending |
-| Customer/admin permissions | 2a,3,4 | positive and negative endpoint tests | Pending |
+| Real JWT validation | 2a | wrong signature/issuer/audience/time failures | Verified: 14 tests |
+| Realm import | 2a,9 | real Keycloak-issued token accepted | Realm verified; Compose pending |
+| Customer/admin permissions | 2a,3,4 | positive and negative endpoint tests | Policy verified; APIs pending |
 | Alice/Bob isolation | 4 | other owner's order returns 404 | Pending |
 | Owner-scoped idempotency | 4 | same owner replay/conflict/concurrency and different owners | Pending |
 | Flyway ownership | 3 | fresh PostgreSQL schemas and restricted credentials | Pending |
@@ -22,7 +22,7 @@ claims of delivered functionality. Test names may evolve with implementation.
 | Terminal consistency | 7 | conflicting result cannot overwrite state | Pending |
 | Retry and DLT | 7 | malformed/exhausted events, unavailable DLT producer | Pending |
 | Safe manual replay | 10 | exact key/payload/ID preserved | Pending |
-| Actuator protection | 8 | public minimal health, scoped metrics access | Pending |
+| Actuator protection | 8 | public minimal health, scoped metrics access | Policy verified; Actuator pending |
 | Observability | 8 | bounded labels, committed-only counters, MDC cleanup | Pending |
 | One-command launch | 9 | Compose build and health readiness | Pending |
 | Persistent data | 9 | restart retains stock/orders | Pending |
