@@ -50,6 +50,19 @@ their actual outcomes, and any remaining limitations before committing and pushi
   [run 36013388798](https://github.com/Tmejs/java-spring-kafka/actions/runs/36013388798)
   completed successfully on Ubuntu.
 
+## Contract-first API checkpoint — 2026-09-24
+
+- Added complete Orders and Inventory OpenAPI contracts with OAuth2 audience
+  scopes, problem responses, idempotency, pagination, and validation constraints.
+- OpenAPI Generator 7.25.0 produces Boot 4/Jackson 3 server interfaces and native
+  Java clients under ignored `target/` directories.
+- Both services expose the original YAML and Swagger UI with PKCE while generated
+  `/v3/api-docs` remains disabled.
+- Java 25 `./mvnw -B clean verify` passed all six reactor projects and six
+  random-port HTTP tests.
+- Independent review passed without Critical or Important findings. Three minor
+  contract/resource documentation cleanups are recorded in the execution ledger.
+
 ## Contract-first HTTP checkpoint — 2026-09-24
 
 - Added authoritative Orders and Inventory OpenAPI 3.0 contracts with stable

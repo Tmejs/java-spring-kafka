@@ -72,3 +72,25 @@ RealmRoleConverter}.java`; both services `security/JwtValidationIT.java` and
   key independently. No role grants implicit access to another customer's order.
 - [ ] Run focused security tests and `./mvnw verify`; record the imported realm and
   JWT checks. Commit/push: `feat: secure APIs with Keycloak JWT authentication`.
+
+## Integration guidance
+
+Read `security-compatibility.md` for current verified Boot4/Security7 dependencies
+and realm-import test setup. API audience scopes orders-api/inventory-api select
+the token audience; CUSTOMER/INVENTORY_ADMIN remain realm roles. Swagger requests
+its own API scope. Preserve scope authorities when adding realm role authorities.
+Use an external issuer and a separate internal JWKS URL for Docker networking.
+
+## Execution notes
+
+- Source baseline will include generated interfaces and three OpenApiExposureIT
+  assertions per service. Keep spec/UI unauthenticated and preserve these tests.
+- Business controllers are not implemented yet: use test-only endpoint fixtures
+  for authorization policy tests rather than adding fake production endpoints.
+- Keycloak 26.7.4 is already pulled on the local Docker daemon. Temporary JDK25
+  is `/private/tmp/reservation-jdk25/jdk-25.0.4.1+1/Contents/Home`.
+- Request permitted host execution for Testcontainers Docker socket access.
+- Record no tokens/client credentials in tool output. Test secrets may be explicit
+  dummy values; realm production placeholders resolve from environment.
+- Keep full report concise and commit only this task's owned files. Parent owns
+  ledger, acceptance matrix, research reports, and final branch pushes.

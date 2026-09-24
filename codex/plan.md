@@ -83,11 +83,11 @@ both service POMs; `O/config/OpenApiConfiguration.java`,
 **Produces:** `OrdersApi` operations `createOrder` and `getOrder`; `ProductsApi`
 operations `createProduct`, `listProducts`, `getProduct`, `addStock`.
 
-- [ ] Define UUID IDs, positive integer quantities, nonempty distinct order items,
+- [x] Define UUID IDs, positive integer quantities, nonempty distinct order items,
   order status/rejection reason, bounded pagination, and problem detail errors.
   Define POST orders as 202 with Location and required Idempotency-Key; define
   GET orders as 200/404 and conflict as 409. Product creation returns 201.
-- [ ] Use these stable paths and operation names:
+- [x] Use these stable paths and operation names:
   ```yaml
   /orders:
     post:
@@ -107,18 +107,18 @@ operations `createProduct`, `listProducts`, `getProduct`, `addStock`.
     post:
       operationId: addStock
   ```
-- [ ] Define OAuth2 authorization-code security, token/authorization URLs, 401/403
+- [x] Define OAuth2 authorization-code security, token/authorization URLs, 401/403
   problem responses, operation-level access rules, and PKCE Swagger settings.
   Generated clients accept access tokens supplied by callers.
-- [ ] Package contracts, unpack them during dependent modules' initialize phase,
+- [x] Package contracts, unpack them during dependent modules' initialize phase,
   and generate Spring interfaces and Java clients at generate-sources. Select a
   generator/library combination verified compatible with Boot 4; keep generated
   dependencies explicit. Do not hand-edit generated sources.
-- [ ] Serve the original YAML and configure Swagger UI to use it. Do not regenerate
+- [x] Serve the original YAML and configure Swagger UI to use it. Do not regenerate
   the public specification from annotations.
-- [ ] Run `./mvnw clean verify`; confirm both clients and server interfaces compile,
+- [x] Run `./mvnw clean verify`; confirm both clients and server interfaces compile,
   generated output stays under target, and the reactor works from a clean checkout.
-- [ ] Commit/push: `feat: generate APIs and clients from OpenAPI contracts`.
+- [x] Commit/push: `feat: generate APIs and clients from OpenAPI contracts`.
 
 ## 2a. Identity provider and resource-server security
 

@@ -6,8 +6,8 @@ claims of delivered functionality. Test names may evolve with implementation.
 | Requirement | Checkpoint | Required evidence | Status |
 |---|---|---|---|
 | Java25 five-module reactor | 1 | clean Maven verify and executable jar smoke | Locally verified; review passed |
-| Generated interfaces/clients | 2 | clean generation/compilation, no tracked generated Java | Pending |
-| Original OpenAPI/Swagger | 2 | HTTP spec and UI retrieval | Pending |
+| Generated interfaces/clients | 2 | clean generation/compilation, no tracked generated Java | Verified |
+| Original OpenAPI/Swagger | 2 | HTTP spec and UI retrieval | Verified: 6 HTTP tests |
 | Real JWT validation | 2a | wrong signature/issuer/audience/time failures | Pending |
 | Realm import | 2a,9 | real Keycloak-issued token accepted | Pending |
 | Customer/admin permissions | 2a,3,4 | positive and negative endpoint tests | Pending |

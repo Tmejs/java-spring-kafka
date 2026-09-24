@@ -94,8 +94,8 @@ operations `createProduct`, `listProducts`, `getProduct`, `addStock`.
   random-port tests and compare served YAML with source. No invented domain routes
   or placeholder controller implementations just to exercise generated interfaces.
 - OpenAPI roles are realm roles, not OAuth scopes: describe role requirements
-  explicitly and use authorizationCode security with empty required scopes for
-  business routes. Monitoring uses metrics.read later; no Actuator path in these
+  explicitly and use authorizationCode with `orders-api` or `inventory-api`
+  audience-selection scopes for the corresponding service business routes. Monitoring uses metrics.read later; no Actuator path in these
   business contracts. Include `orders-api`/`inventory-api` audience documentation.
 - Demo issuer is `http://localhost:8180/realms/reservation`; auth/token paths follow
   Keycloak `/protocol/openid-connect/auth` and `/token`. Swagger public client
