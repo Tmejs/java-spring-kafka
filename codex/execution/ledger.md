@@ -105,3 +105,23 @@ zero failures/errors/skips. Independent review: spec PASS, quality PASS, no find
 Task 2a: complete (commit 1c91643, review clean).
 Owner isolation remains explicitly assigned to checkpoints 3/4 because business
 controllers and persistence do not exist yet; policy fixtures only establish roles.
+Task 2a remote checkpoint: local and remote SHA matched at 215746b after review
+records and pipeline removal.
+Task 3: in progress; base 215746b; implementer persistence_inventory.
+Environment preparation: PostgreSQL 18.1 image pulled successfully with digest
+`sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f`.
+Task 3: locally implemented in 6968894. Full SDKMAN Java 25 reactor verification
+PASS: six modules, 40 tests, zero failures/errors/skips. Independent reviewer
+persistence_review dispatched against 215746b..6968894.
+Ruling: local Keycloak realm uses `sslRequired: none` because the documented local
+Compose/Testcontainers setup is HTTP and Docker Desktop bridge requests were
+rejected as external with `403 HTTPS required` — this is explicitly a local
+development realm, and production TLS remains outside v1 — if wrong, local realm
+tests and demo authentication fail until HTTPS is introduced.
+Task 3 review: spec PASS; fix round 1/5 for Important flaky UUID pagination
+expectation (Java signed halves did not match PostgreSQL byte ordering).
+Task 3: minor (deferred): enforce positive quantity inside public
+`ProductService.addStock`, in addition to generated HTTP validation.
+Task 3: fix round 1/5 (Important pagination finding addressed, 0 open;
+commit 2176f13). Scoped re-review found no new Critical/Important breakage.
+Task 3: complete (commits 6968894..2176f13, review clean with 1 deferred Minor).

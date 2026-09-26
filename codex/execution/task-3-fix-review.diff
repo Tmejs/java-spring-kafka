@@ -1,0 +1,133 @@
+diff --git a/codex/execution/task-3-report.md b/codex/execution/task-3-report.md
+index 0fc3c15..30c4fc0 100644
+--- a/codex/execution/task-3-report.md
++++ b/codex/execution/task-3-report.md
+@@ -42,20 +42,32 @@
+   and two simultaneous additions with the exact final quantity
+   `before + firstAdd + secondAdd`.
+ - GREEN, local realm regression:
+   `./mvnw -B -pl order-service -am verify -Dtest=NoUnitTests -Dit.test=KeycloakRealmIT -Dsurefire.failIfNoSpecifiedTests=false -Dfailsafe.failIfNoSpecifiedTests=false`
+   passed the real Keycloak token and cross-audience checks.
+ - GREEN, full reactor: `./mvnw -B verify` passed on Temurin 25.0.4 in 43.005 s:
+   40 tests, zero failures, zero errors, zero skips. This preserves all 33 baseline
+   tests and adds seven PostgreSQL-backed tests.
+ - `git diff --check` passed.
+ 
++## Review fix — PostgreSQL UUID pagination order
++
++- RED: the focused `ProductApiIT` command above failed deterministically after
++  replacing random IDs with four fixed UUIDs that cross the signed high bit and a
++  page boundary. Java UUID natural order expected `8000`, `ffff`, `0000`, `7fff`,
++  while PostgreSQL returned canonical UUID order `0000`, `7fff`, `8000`, `ffff`.
++- GREEN: the expected order now uses
++  `Comparator.comparing(UUID::toString)`, matching PostgreSQL UUID ordering for
++  canonical lowercase UUIDs. The focused suite passed 5 tests with PostgreSQL
++  18.1, and `./mvnw -B verify` passed all 40 tests in 50.523 s with zero failures,
++  errors, or skips.
++
+ ## Pinned database image
+ 
+ - Tests use the official `postgres:18.1` image.
+ - Locally pulled digest:
+   `postgres@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f`.
+ - Runtime verification reported PostgreSQL 18.1 and Testcontainers 2.0.5.
+ 
+ ## Remaining scope
+ 
+ Orders HTTP behavior, reservation processing, Kafka, and outbox publishing remain
+diff --git a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/product/ProductApiIT.java b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/product/ProductApiIT.java
+index a3ec180..f8fa738 100644
+--- a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/product/ProductApiIT.java
++++ b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/product/ProductApiIT.java
+@@ -20,20 +20,21 @@ import jakarta.persistence.EntityManagerFactory;
+ import java.io.IOException;
+ import java.net.InetAddress;
+ import java.net.InetSocketAddress;
+ import java.nio.charset.StandardCharsets;
+ import java.security.KeyPair;
+ import java.security.KeyPairGenerator;
+ import java.security.interfaces.RSAPrivateKey;
+ import java.security.interfaces.RSAPublicKey;
+ import java.time.Instant;
+ import java.util.ArrayList;
++import java.util.Comparator;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.UUID;
+ import java.util.concurrent.CountDownLatch;
+ import java.util.concurrent.Executors;
+ import java.util.concurrent.TimeUnit;
+ import org.junit.jupiter.api.AfterAll;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+ import org.springframework.beans.factory.annotation.Autowired;
+@@ -98,46 +99,61 @@ class ProductApiIT extends InventoryPostgresIntegrationTest {
+         assertThat(jdbc.queryForObject(
+                         "select indexdef from pg_indexes where schemaname = 'public' "
+                                 + "and tablename = 'outbox' and indexname = 'idx_outbox_pending'",
+                         String.class))
+                 .contains("WHERE (published_at IS NULL)");
+     }
+ 
+     @Test
+     void createsDuplicateNamesAndListsStableUuidOrderedPages() throws Exception {
+         ProductsApi admin = api("INVENTORY_ADMIN");
+-        var created = new ArrayList<Product>();
+-        created.add(admin.createProduct(createRequest("same-name", 3)));
+-        created.add(admin.createProduct(createRequest("same-name", 5)));
+-        created.add(admin.createProduct(createRequest("different", 7)));
++        Product firstDuplicate = admin.createProduct(createRequest("same-name", 3));
++        Product secondDuplicate = admin.createProduct(createRequest("same-name", 5));
++        assertThat(firstDuplicate.getId()).isNotEqualTo(secondDuplicate.getId());
+ 
+-        assertThat(created).extracting(Product::getId).doesNotHaveDuplicates();
+-        var expectedIds = created.stream().map(Product::getId).sorted().toList();
++        jdbc.execute("truncate table products cascade");
++        var fixtureIds = List.of(
++                UUID.fromString("ffffffff-0000-4000-8000-000000000001"),
++                UUID.fromString("00000000-0000-4000-8000-000000000001"),
++                UUID.fromString("80000000-0000-4000-8000-000000000001"),
++                UUID.fromString("7fffffff-0000-4000-8000-000000000001"));
++        fixtureIds.forEach(this::insertProduct);
++        var expectedIds = fixtureIds.stream()
++                .sorted(Comparator.comparing(UUID::toString))
++                .toList();
+         var firstPage = api("CUSTOMER").listProducts(0, 2);
+         var secondPage = api("CUSTOMER").listProducts(1, 2);
+         var actualIds = new ArrayList<UUID>();
+         firstPage.getContent().forEach(product -> actualIds.add(product.getId()));
+         secondPage.getContent().forEach(product -> actualIds.add(product.getId()));
+ 
+         assertThat(actualIds).containsExactlyElementsOf(expectedIds);
+         assertThat(firstPage.getPage()).isZero();
+         assertThat(firstPage.getSize()).isEqualTo(2);
+-        assertThat(firstPage.getTotalElements()).isEqualTo(3);
++        assertThat(firstPage.getTotalElements()).isEqualTo(4);
+         assertThat(firstPage.getTotalPages()).isEqualTo(2);
+-        assertThat(api("CUSTOMER").getProduct(created.getFirst().getId())).isEqualTo(created.getFirst());
++        assertThat(api("CUSTOMER").getProduct(fixtureIds.getFirst()).getName()).isEqualTo("fixture");
+         assertThat(admin.createProductWithHttpInfo(createRequest("location", 0))
+                         .getHeaders().get("location"))
+                 .singleElement()
+                 .asString()
+                 .startsWith("/products/");
+     }
+ 
++    private void insertProduct(UUID id) {
++        jdbc.update(
++                "insert into products(id, name, available_quantity) values (?, ?, ?)",
++                id,
++                "fixture",
++                1);
++    }
++
+     @Test
+     void enforcesAuthenticationRolesAndPaginationBounds() throws Exception {
+         Product created = api("INVENTORY_ADMIN").createProduct(createRequest("secured", 1));
+ 
+         assertThat(api("CUSTOMER").getProduct(created.getId()).getName()).isEqualTo("secured");
+         assertApiProblem(() -> api("CUSTOMER").createProduct(createRequest("denied", 0)), 403);
+         assertApiProblem(() -> api("CUSTOMER").addStock(created.getId(), stockRequest(1)), 403);
+         assertApiProblem(() -> anonymousApi().getProduct(created.getId()), 401);
+         assertApiProblem(() -> api("CUSTOMER").listProducts(-1, 20), 400);
+         assertApiProblem(() -> api("CUSTOMER").listProducts(0, 101), 400);

@@ -13,9 +13,9 @@ claims of delivered functionality. Test names may evolve with implementation.
 | Customer/admin permissions | 2a,3,4 | positive and negative endpoint tests | Policy verified; APIs pending |
 | Alice/Bob isolation | 4 | other owner's order returns 404 | Pending |
 | Owner-scoped idempotency | 4 | same owner replay/conflict/concurrency and different owners | Pending |
-| Flyway ownership | 3 | fresh PostgreSQL schemas and restricted credentials | Pending |
+| Flyway ownership | 3 | fresh PostgreSQL schemas and restricted credentials | Schemas verified; role isolation pending Compose |
 | All-or-nothing reservation | 6 | multi-item failure leaves every stock count unchanged | Pending |
-| No overselling | 6 | competing transactions and exact final stock | Pending |
+| No overselling | 6 | competing transactions and exact final stock | Stock-add locking verified; reservation pending |
 | Duplicate protection | 6,7 | same event and different event ID for same order | Pending |
 | Outbox recovery | 5 | broker unavailable/recovered and send-before-mark replay | Pending |
 | Consumer DB/offset gap | 6,7 | redelivery cannot repeat business effect | Pending |

@@ -65,3 +65,25 @@ int)` and reservation processing later use identical pessimistic row locks.
   for validation, missing product, and conflicting requests. Test the real HTTP API.
 - [ ] Run focused ITs via Failsafe and `./mvnw verify`; expect migrations and APIs pass.
 - [ ] Commit/push: `feat: migrate service databases and expose inventory API`.
+
+## Execution context
+
+- Baseline is reviewed commit `215746b`: Boot 4.1.1, Java 25, generated APIs,
+  Keycloak JWT security, and 33 passing tests.
+- Java 25 is installed and active through SDKMAN. Use local `./mvnw -B verify`;
+  there is intentionally no GitHub Actions pipeline.
+- Docker Desktop is running. Use pinned PostgreSQL 18.1 for Testcontainers unless
+  current official compatibility evidence requires another exact patch version.
+- Implement generated `ProductsApi`; do not introduce hand-written public request
+  or response DTOs. Use explicit mapper methods between generated models and domain.
+- Tests call actual HTTP endpoints with generated clients and real signed JWTs or
+  the supported test token mechanism. Cover CUSTOMER reads, admin mutations, and
+  denied CUSTOMER mutations. Keep owner isolation tests assigned to task 4 because
+  Orders business endpoints do not exist in this task.
+- Product creation must define deterministic duplicate behavior: product IDs are
+  server-generated; names are not unique. Stock addition rejects integer overflow.
+- Pagination uses stable product-ID ordering and the exact bounds from OpenAPI.
+- Both services receive complete V1 Flyway schemas even though Orders behavior is
+  implemented in task 4. Schema constraints must match the approved design.
+- Parent owns the execution ledger, acceptance matrix, review artifacts, pushes,
+  and the pipeline-removal documentation. Do not edit those files.

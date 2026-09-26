@@ -169,22 +169,22 @@ ProductService,ProductsController}.java`; each service
 **Produces:** migrated schemas and product operations. `ProductService.addStock(UUID,
 int)` and reservation processing later use identical pessimistic row locks.
 
-- [ ] Write PostgreSQL-backed migration/startup tests and generated-client product
+- [x] Write PostgreSQL-backed migration/startup tests and generated-client product
   tests. Assert creation, list pagination, stock addition, invalid quantities, 404,
   and concurrent additions without lost updates.
   ```java
   assertThat(after.getAvailableQuantity()).isEqualTo(before + firstAdd + secondAdd);
   ```
-- [ ] Create order/items, idempotency, outbox, processed-event tables in Orders;
+- [x] Create order/items, idempotency, outbox, processed-event tables in Orders;
   products, reservations, outbox, processed-event tables in Inventory. Include
   unique event IDs, unique reservation order IDs, unique owner/key pairs,
   nonnegative stock checks, and pending-outbox indexes. Store outbox payload as text.
-- [ ] Set Hibernate `ddl-auto: validate`; include Flyway PostgreSQL support. Create
+- [x] Set Hibernate `ddl-auto: validate`; include Flyway PostgreSQL support. Create
   repositories and explicit generated-model mapping in thin controllers.
-- [ ] Lock stock updates, reject overflow, and implement problem detail responses
+- [x] Lock stock updates, reject overflow, and implement problem detail responses
   for validation, missing product, and conflicting requests. Test the real HTTP API.
-- [ ] Run focused ITs via Failsafe and `./mvnw verify`; expect migrations and APIs pass.
-- [ ] Commit/push: `feat: migrate service databases and expose inventory API`.
+- [x] Run focused ITs via Failsafe and `./mvnw verify`; expect migrations and APIs pass.
+- [x] Commit/push: `feat: migrate service databases and expose inventory API`.
 
 ## 4. Event contracts and atomic order creation
 
