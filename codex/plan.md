@@ -151,7 +151,7 @@ RealmRoleConverter}.java`; both services `security/JwtValidationIT.java` and
   Swagger/spec resources and minimal health; protect metrics with metrics.read.
   Disable CSRF only on the stateless bearer API/management chains; configure
   specific origins if needed. Never log Authorization or raw tokens.
-- [ ] Add owner isolation assertions to checkpoints 3/4 when controllers exist:
+- [x] Add owner isolation assertions to checkpoints 3/4 when controllers exist:
   Alice creates/reads her order; Bob receives 404; each can use the same idempotency
   key independently. No role grants implicit access to another customer's order.
 - [x] Run focused security tests and `./mvnw verify`; record the imported realm and
@@ -201,24 +201,24 @@ UUID orderId)`; `OrderCreated(EventMetadata metadata, List<OrderLine> items)`;
 `EventCodec.encode(Object)` returns JSON; explicit typed decode methods validate
 event type/version and reject unsupported versions without trusting class headers.
 
-- [ ] Write codec round-trip/malformed/version tests and HTTP creation tests for
+- [x] Write codec round-trip/malformed/version tests and HTTP creation tests for
   replay, changed payload, simultaneous same-key requests, empty/duplicate items.
   ```java
   assertThat(replayedOrderId).isEqualTo(firstOrderId);
   assertThat(orderCount).isEqualTo(1);
   assertThat(pendingOutboxCount).isEqualTo(1);
   ```
-- [ ] Canonicalize item order by product ID before hashing. Atomically claim the
+- [x] Canonicalize item order by product ID before hashing. Atomically claim the
   `(owner_subject, idempotency_key)` using PostgreSQL `INSERT ... ON CONFLICT DO NOTHING`; avoid
   catching a constraint violation and continuing an aborted transaction.
-- [ ] Save order, items, original response/fingerprint, and serialized OrderCreated
+- [x] Save order, items, original response/fingerprint, and serialized OrderCreated
   outbox entry in one transaction. A conflicting key returns 409; a matching key
   returns the original 202 body and Location even if order status has since changed.
-- [ ] Derive ownership from the authenticated JWT subject and persist it on orders.
+- [x] Derive ownership from the authenticated JWT subject and persist it on orders.
   Implement GET order with an owner-qualified query (404 for other owners),
   current status, and rejection reason. Test different subjects using the same key. Inject `Clock`
   for timestamps; use generated HTTP clients in actual endpoint tests.
-- [ ] Run focused tests and `./mvnw verify`; commit/push:
+- [x] Run focused tests and `./mvnw verify`; commit/push:
   `feat: create idempotent orders with transactional outbox`.
 
 ## 5. Kafka transport and outbox publishing

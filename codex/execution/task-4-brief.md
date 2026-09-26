@@ -71,3 +71,30 @@ event type/version and reject unsupported versions without trusting class header
   for timestamps; use generated HTTP clients in actual endpoint tests.
 - [ ] Run focused tests and `./mvnw verify`; commit/push:
   `feat: create idempotent orders with transactional outbox`.
+
+## Execution context
+
+- Baseline is reviewed commit `676c1f1`: Boot 4.1.1, Java 25, generated APIs,
+  Keycloak security, Flyway/JPA schemas, and 40 passing local tests.
+- Java 25 is active through SDKMAN. There is no GitHub Actions pipeline; use local
+  `./mvnw -B verify` as the required gate. Docker/PostgreSQL 18.1 is available.
+- Implement the generated `OrdersApi` and map explicitly between generated models
+  and domain entities. Do not expose JPA entities.
+- Preserve the schema established in task 3. If a schema correction is necessary,
+  add a new Flyway migration rather than editing V1, unless V1 has not been pushed
+  to a released deployment and the report explicitly justifies the correction.
+- Owner subject comes only from `CurrentOwner`; every order lookup is qualified by
+  owner and another owner's order returns 404.
+- Idempotency uniqueness is `(owner_subject, idempotency_key)`. Tests must cover
+  identical replay, changed payload conflict, concurrent same-key requests, and
+  the same key used independently by Alice and Bob.
+- Canonical request fingerprints sort product IDs, preserve quantities, and use a
+  stable documented digest. Duplicate product IDs are rejected before persistence.
+- Outbox insertion is in the same database transaction as the new order and
+  idempotency record. Event IDs/timestamps/order IDs are generated once and replay
+  returns the originally persisted HTTP body and Location.
+- Event JSON must have explicit event type/schema version and no Java class-name
+  metadata. Decode methods reject malformed JSON, wrong event type, and unsupported
+  schema version.
+- Parent owns ledger, acceptance matrix, briefs, review artifacts, and pushes.
+  Do not edit those files. Commit locally only after full local verification.

@@ -124,3 +124,21 @@ their actual outcomes, and any remaining limitations before committing and pushi
   development mode works through Docker Desktop's bridge network.
 - Temurin Java 25.0.4 `./mvnw -B verify` passed all six reactor modules: 40 tests,
   zero failures, zero errors, and zero skips.
+
+## Atomic order creation checkpoint — 2026-09-26
+
+- Added explicit, versioned event records and typed JSON decoding for order-created
+  and reservation-result events without Java class metadata.
+- Implemented the generated Orders API with JWT-subject ownership, owner-qualified
+  reads, canonical SHA-256 request fingerprints, and PostgreSQL-safe idempotency
+  claims for retries and concurrent requests.
+- Order, line items, the original replay response, and the OrderCreated outbox row
+  commit atomically. Matching retries replay the original `202` response and
+  Location; changed requests return `409`.
+- Integration coverage verifies Alice/Bob isolation, owner-scoped idempotency,
+  concurrent same-key requests, duplicate and empty item rejection, exact duplicate
+  JSON lines, deterministic event timestamps, and zero partial persistence.
+- Independent review found and then approved the fix for generated request sets
+  collapsing identical JSON items before domain validation.
+- Fresh controller verification with SDKMAN Temurin 25.0.4 passed the complete
+  six-module reactor: 50 tests, zero failures, zero errors, and zero skips.

@@ -10,9 +10,9 @@ claims of delivered functionality. Test names may evolve with implementation.
 | Original OpenAPI/Swagger | 2 | HTTP spec and UI retrieval | Verified: 6 HTTP tests |
 | Real JWT validation | 2a | wrong signature/issuer/audience/time failures | Verified: 14 tests |
 | Realm import | 2a,9 | real Keycloak-issued token accepted | Realm verified; Compose pending |
-| Customer/admin permissions | 2a,3,4 | positive and negative endpoint tests | Policy verified; APIs pending |
-| Alice/Bob isolation | 4 | other owner's order returns 404 | Pending |
-| Owner-scoped idempotency | 4 | same owner replay/conflict/concurrency and different owners | Pending |
+| Customer/admin permissions | 2a,3,4 | positive and negative endpoint tests | Verified for current APIs |
+| Alice/Bob isolation | 4 | other owner's order returns 404 | Verified |
+| Owner-scoped idempotency | 4 | same owner replay/conflict/concurrency and different owners | Verified |
 | Flyway ownership | 3 | fresh PostgreSQL schemas and restricted credentials | Schemas verified; role isolation pending Compose |
 | All-or-nothing reservation | 6 | multi-item failure leaves every stock count unchanged | Pending |
 | No overselling | 6 | competing transactions and exact final stock | Stock-add locking verified; reservation pending |

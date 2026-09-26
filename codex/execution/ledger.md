@@ -125,3 +125,18 @@ Task 3: minor (deferred): enforce positive quantity inside public
 Task 3: fix round 1/5 (Important pagination finding addressed, 0 open;
 commit 2176f13). Scoped re-review found no new Critical/Important breakage.
 Task 3: complete (commits 6968894..2176f13, review clean with 1 deferred Minor).
+Task 3 remote checkpoint: local and remote SHA matched at 676c1f1 after review
+records. Fresh controller `./mvnw -B verify` PASS: six modules, 40 tests.
+Task 4: in progress; base 676c1f1; implementer order_creation.
+Task 4: locally implemented in d2e0e17. Full SDKMAN Java 25 reactor verification
+PASS: six modules, 49 tests, zero failures/errors/skips. Independent reviewer
+order_creation_review dispatched against 676c1f1..d2e0e17.
+Task 4 review: fix round 1/5 for Important identical-duplicate-line acceptance.
+OpenAPI `uniqueItems` generated a Set and collapsed exact duplicate JSON values
+before domain validation; fix must preserve a List and reject repeated product IDs.
+Task 4: fix round 1/5 addressed in 7438dbc. Scoped re-review approved the fix with
+zero open Critical/Important findings; exact duplicate JSON items now return 400
+with zero order, idempotency, or outbox persistence.
+Task 4: complete (commits d2e0e17 and 7438dbc; independent review clean after one
+fix round). Fresh controller-owned SDKMAN Temurin 25.0.4 `./mvnw -B verify` PASS:
+six reactor modules, 50 tests, zero failures/errors/skips.
