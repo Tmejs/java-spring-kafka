@@ -27,4 +27,19 @@ public class OrderItemEntity {
     private int quantity;
 
     protected OrderItemEntity() {}
+
+    OrderItemEntity(UUID id, OrderEntity order, UUID productId, int quantity) {
+        this.id = id;
+        this.order = order;
+        this.productId = productId;
+        this.quantity = quantity;
+    }
+
+    UUID getProductId() {
+        return productId;
+    }
+
+    int getQuantity() {
+        return quantity;
+    }
 }
