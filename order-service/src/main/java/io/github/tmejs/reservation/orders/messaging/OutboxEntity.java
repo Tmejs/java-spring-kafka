@@ -64,4 +64,28 @@ public class OutboxEntity {
         this.nextAttemptAt = createdAt;
         this.attemptCount = 0;
     }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public UUID getEventId() {
+        return eventId;
+    }
+
+    public UUID getOrderId() {
+        return orderId;
+    }
+
+    public String getTopic() {
+        return topic;
+    }
+
+    public String getPayload() {
+        return payload;
+    }
+
+    public int getAttemptCount() {
+        return attemptCount;
+    }
 }

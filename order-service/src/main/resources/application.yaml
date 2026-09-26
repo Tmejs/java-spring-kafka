@@ -11,6 +11,14 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
   security:
     oauth2:
       resourceserver:
@@ -21,6 +29,15 @@ spring:
 
 server:
   port: 8080
+
+reservation:
+  outbox:
+    batch-size: 100
+    fixed-delay: 1s
+    initial-delay: 1s
+    ack-timeout: 10s
+    backoff-initial: 1s
+    backoff-max: 5m
 
 springdoc:
   api-docs:

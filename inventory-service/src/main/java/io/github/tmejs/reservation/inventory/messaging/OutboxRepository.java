@@ -1,4 +1,4 @@
-package io.github.tmejs.reservation.orders.messaging;
+package io.github.tmejs.reservation.inventory.messaging;
 
 import java.time.Instant;
 import java.util.List;

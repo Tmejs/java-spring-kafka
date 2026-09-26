@@ -45,4 +45,28 @@ public class OutboxEntity {
     private String lastError;
 
     protected OutboxEntity() {}
+
+    public UUID getId() {
+        return id;
+    }
+
+    public UUID getEventId() {
+        return eventId;
+    }
+
+    public UUID getOrderId() {
+        return orderId;
+    }
+
+    public String getTopic() {
+        return topic;
+    }
+
+    public String getPayload() {
+        return payload;
+    }
+
+    public int getAttemptCount() {
+        return attemptCount;
+    }
 }
