@@ -23,6 +23,10 @@ import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -31,7 +35,6 @@ import java.security.interfaces.RSAPublicKey;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -191,6 +194,30 @@ class OrderCreationIT extends OrderPostgresIntegrationTest {
         assertThat(jdbc.queryForObject("select count(*) from outbox", Integer.class)).isZero();
     }
 
+    @Test
+    void rejectsTwoExactlyIdenticalJsonItemsBeforePersistence() throws Exception {
+        UUID productId = UUID.randomUUID();
+        String body = """
+                {"items":[
+                  {"productId":"%s","quantity":2},
+                  {"productId":"%s","quantity":2}
+                ]}
+                """.formatted(productId, productId);
+        var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/orders"))
+                .header("Authorization", "Bearer " + token("alice-subject"))
+                .header("Content-Type", "application/json")
+                .header("Idempotency-Key", "exact-duplicate")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+
+        var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(jdbc.queryForObject("select count(*) from orders", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from idempotency_keys", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from outbox", Integer.class)).isZero();
+    }
+
     private Order createAfterBarrier(
             String subject, UUID productId, CountDownLatch ready, CountDownLatch start) throws Exception {
         ready.countDown();
@@ -208,7 +235,7 @@ class OrderCreationIT extends OrderPostgresIntegrationTest {
     }
 
     private static CreateOrderRequest request(OrderItem... items) {
-        return new CreateOrderRequest().items(new LinkedHashSet<>(List.of(items)));
+        return new CreateOrderRequest().items(List.of(items));
     }
 
     private static OrderItem item(UUID productId, int quantity) {

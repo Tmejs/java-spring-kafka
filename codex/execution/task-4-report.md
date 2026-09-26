@@ -22,9 +22,14 @@ completion flow, so no migration was changed or added.
 - RED: `OrderCreationIT` reached the real secured HTTP service and returned `404`
   for the five missing endpoint behaviors. GREEN: 5 generated-client tests passed
   with PostgreSQL 18.1 and RSA-signed JWTs.
+- Review RED: a raw request containing the same `{productId, quantity}` object twice
+  returned `202` because request `uniqueItems` generated a `Set` and collapsed the
+  duplicate before domain validation. GREEN: request items now generate as a `List`;
+  the unchanged product-id validation returns `400` and persists no order,
+  idempotency key, or outbox row. Focused `OrderCreationIT`: 6 tests passed.
 - HTTP coverage includes original-response replay after status mutation, changed
   payload conflict, simultaneous same-key requests, Alice/Bob using the same key,
   owner-isolated GET, empty/duplicate items, injected-clock event timestamps, and
   one pending outbox row.
 - Full local gate: SDKMAN Temurin Java `25.0.4`, `./mvnw -B verify` — PASS,
-  49 tests, 0 failures/errors/skips (the prior 40 plus 9 task 4 tests).
+  50 tests, 0 failures/errors/skips (the prior 40 plus 10 task 4 tests).
