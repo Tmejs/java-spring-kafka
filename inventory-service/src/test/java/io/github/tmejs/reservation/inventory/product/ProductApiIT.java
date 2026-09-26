@@ -27,6 +27,7 @@ import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -105,13 +106,20 @@ class ProductApiIT extends InventoryPostgresIntegrationTest {
     @Test
     void createsDuplicateNamesAndListsStableUuidOrderedPages() throws Exception {
         ProductsApi admin = api("INVENTORY_ADMIN");
-        var created = new ArrayList<Product>();
-        created.add(admin.createProduct(createRequest("same-name", 3)));
-        created.add(admin.createProduct(createRequest("same-name", 5)));
-        created.add(admin.createProduct(createRequest("different", 7)));
+        Product firstDuplicate = admin.createProduct(createRequest("same-name", 3));
+        Product secondDuplicate = admin.createProduct(createRequest("same-name", 5));
+        assertThat(firstDuplicate.getId()).isNotEqualTo(secondDuplicate.getId());
 
-        assertThat(created).extracting(Product::getId).doesNotHaveDuplicates();
-        var expectedIds = created.stream().map(Product::getId).sorted().toList();
+        jdbc.execute("truncate table products cascade");
+        var fixtureIds = List.of(
+                UUID.fromString("ffffffff-0000-4000-8000-000000000001"),
+                UUID.fromString("00000000-0000-4000-8000-000000000001"),
+                UUID.fromString("80000000-0000-4000-8000-000000000001"),
+                UUID.fromString("7fffffff-0000-4000-8000-000000000001"));
+        fixtureIds.forEach(this::insertProduct);
+        var expectedIds = fixtureIds.stream()
+                .sorted(Comparator.comparing(UUID::toString))
+                .toList();
         var firstPage = api("CUSTOMER").listProducts(0, 2);
         var secondPage = api("CUSTOMER").listProducts(1, 2);
         var actualIds = new ArrayList<UUID>();
@@ -121,14 +129,22 @@ class ProductApiIT extends InventoryPostgresIntegrationTest {
         assertThat(actualIds).containsExactlyElementsOf(expectedIds);
         assertThat(firstPage.getPage()).isZero();
         assertThat(firstPage.getSize()).isEqualTo(2);
-        assertThat(firstPage.getTotalElements()).isEqualTo(3);
+        assertThat(firstPage.getTotalElements()).isEqualTo(4);
         assertThat(firstPage.getTotalPages()).isEqualTo(2);
-        assertThat(api("CUSTOMER").getProduct(created.getFirst().getId())).isEqualTo(created.getFirst());
+        assertThat(api("CUSTOMER").getProduct(fixtureIds.getFirst()).getName()).isEqualTo("fixture");
         assertThat(admin.createProductWithHttpInfo(createRequest("location", 0))
                         .getHeaders().get("location"))
                 .singleElement()
                 .asString()
                 .startsWith("/products/");
+    }
+
+    private void insertProduct(UUID id) {
+        jdbc.update(
+                "insert into products(id, name, available_quantity) values (?, ?, ?)",
+                id,
+                "fixture",
+                1);
     }
 
     @Test

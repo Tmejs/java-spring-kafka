@@ -49,6 +49,18 @@
   tests and adds seven PostgreSQL-backed tests.
 - `git diff --check` passed.
 
+## Review fix — PostgreSQL UUID pagination order
+
+- RED: the focused `ProductApiIT` command above failed deterministically after
+  replacing random IDs with four fixed UUIDs that cross the signed high bit and a
+  page boundary. Java UUID natural order expected `8000`, `ffff`, `0000`, `7fff`,
+  while PostgreSQL returned canonical UUID order `0000`, `7fff`, `8000`, `ffff`.
+- GREEN: the expected order now uses
+  `Comparator.comparing(UUID::toString)`, matching PostgreSQL UUID ordering for
+  canonical lowercase UUIDs. The focused suite passed 5 tests with PostgreSQL
+  18.1, and `./mvnw -B verify` passed all 40 tests in 50.523 s with zero failures,
+  errors, or skips.
+
 ## Pinned database image
 
 - Tests use the official `postgres:18.1` image.
