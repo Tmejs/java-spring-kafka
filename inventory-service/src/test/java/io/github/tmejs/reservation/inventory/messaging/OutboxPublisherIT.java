@@ -29,8 +29,8 @@ import org.testcontainers.kafka.KafkaContainer;
 
 @SpringBootTest(classes = InventoryApplication.class, properties = {
         "reservation.outbox.batch-size=2", "reservation.outbox.scheduling-enabled=false",
-        "reservation.outbox.ack-timeout=10s", "reservation.outbox.backoff-initial=10ms",
-        "reservation.outbox.backoff-max=100ms", "logging.level.org.apache.kafka=WARN"})
+        "reservation.outbox.ack-timeout=1s", "reservation.outbox.backoff-initial=5s",
+        "reservation.outbox.backoff-max=10s", "logging.level.org.apache.kafka=WARN"})
 class OutboxPublisherIT extends InventoryPostgresIntegrationTest {
     private static final String TOPIC = "reservation-results.v1";
     private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka-native:4.1.1");
@@ -111,6 +111,48 @@ class OutboxPublisherIT extends InventoryPostgresIntegrationTest {
         assertThat(copies).allMatch(copy -> copy.payload().contains(original.eventId().toString()));
         assertThat(jdbc.queryForObject("select published_at from outbox where id = ?", Instant.class, original.rowId()))
                 .isNotNull();
+    }
+
+    @Test
+    void brokerOutageTimesOutAndPublishesPendingRowAfterRecovery() {
+        TestEvent original = insert(TOPIC);
+        KAFKA.getDockerClient().pauseContainerCmd(KAFKA.getContainerId()).exec();
+        try {
+            await().atMost(Duration.ofSeconds(5)).until(this::isKafkaPaused);
+
+            Instant startedAt = Instant.now();
+            publisher.publishBatch();
+
+            assertThat(Duration.between(startedAt, Instant.now())).isLessThan(Duration.ofSeconds(3));
+            Map<String, Object> pending = jdbc.queryForMap(
+                    "select attempt_count, published_at, last_error from outbox where id = ?", original.rowId());
+            assertThat(pending.get("attempt_count")).isEqualTo(1);
+            assertThat(pending.get("published_at")).isNull();
+            assertThat(pending.get("last_error")).asString().isNotBlank();
+            assertThat(jdbc.queryForObject(
+                            "select next_attempt_at from outbox where id = ?", Instant.class, original.rowId()))
+                    .isAfter(Instant.now());
+        } finally {
+            KAFKA.getDockerClient().unpauseContainerCmd(KAFKA.getContainerId()).exec();
+            await().atMost(Duration.ofSeconds(10)).until(() -> !isKafkaPaused());
+        }
+
+        jdbc.update("update outbox set next_attempt_at = now() where id = ?", original.rowId());
+        publisher.publishBatch();
+
+        assertThat(consume(1, copy -> copy.payload().equals(original.payload())))
+                .allMatch(copy -> copy.key().equals(original.orderId().toString()))
+                .allMatch(copy -> copy.payload().equals(original.payload()));
+        assertThat(jdbc.queryForObject("select published_at from outbox where id = ?", Instant.class, original.rowId()))
+                .isNotNull();
+    }
+
+    private boolean isKafkaPaused() {
+        return Boolean.TRUE.equals(KAFKA.getDockerClient()
+                .inspectContainerCmd(KAFKA.getContainerId())
+                .exec()
+                .getState()
+                .getPaused());
     }
 
     private TestEvent insert(String topic) {

@@ -38,18 +38,29 @@ Both `OutboxPublisherIT` suites use real PostgreSQL 18.1 and Kafka. They prove:
   topic and eligibility are recovered;
 - a record sent before its database row is marked is sent again on the next cycle with
   the same key, event ID, and payload, after which `published_at` is populated.
+- a real broker outage returns within the configured finite acknowledgement timeout,
+  leaves the row pending, and persists its incremented attempt count, future retry time,
+  and error detail. The tests pause and resume the same Kafka container, preserving its
+  bootstrap address, then use the same publisher instance to publish the exact key and
+  payload after recovery and mark the row published.
+
+The outage/recovery review fix did not require a production change: the new tests were
+GREEN immediately because the publisher already applied a finite acknowledgement
+timeout and persisted retry state. This was a missing integration-evidence case, so no
+artificial RED was introduced. The existing invalid-topic scenario remains the focused
+evidence for per-row continuation within a batch.
 
 Focused GREEN:
 
-- Order `OutboxPublisherIT`: 3 tests passed.
-- Inventory `OutboxPublisherIT`: 3 tests passed.
+- Order `OutboxPublisherIT`: 4 tests passed.
+- Inventory `OutboxPublisherIT`: 4 tests passed.
 
 Full Java 25 gate:
 
 ```text
 ./mvnw -B verify
 BUILD SUCCESS
-Tests: 56, failures: 0, errors: 0, skipped: 0
+Tests: 58, failures: 0, errors: 0, skipped: 0
 ```
 
 ## Version choice and limitations
