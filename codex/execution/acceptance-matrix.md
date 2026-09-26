@@ -17,7 +17,7 @@ claims of delivered functionality. Test names may evolve with implementation.
 | All-or-nothing reservation | 6 | multi-item failure leaves every stock count unchanged | Pending |
 | No overselling | 6 | competing transactions and exact final stock | Stock-add locking verified; reservation pending |
 | Duplicate protection | 6,7 | same event and different event ID for same order | Pending |
-| Outbox recovery | 5 | broker unavailable/recovered and send-before-mark replay | Pending |
+| Outbox recovery | 5 | broker unavailable/recovered and send-before-mark replay | Verified in both services |
 | Consumer DB/offset gap | 6,7 | redelivery cannot repeat business effect | Pending |
 | Terminal consistency | 7 | conflicting result cannot overwrite state | Pending |
 | Retry and DLT | 7 | malformed/exhausted events, unavailable DLT producer | Pending |

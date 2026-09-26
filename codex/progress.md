@@ -142,3 +142,25 @@ their actual outcomes, and any remaining limitations before committing and pushi
   collapsing identical JSON items before domain validation.
 - Fresh controller verification with SDKMAN Temurin 25.0.4 passed the complete
   six-module reactor: 50 tests, zero failures, zero errors, and zero skips.
+
+## Kafka outbox publishing checkpoint — 2026-09-27
+
+- Added Spring Kafka publishers to both services using Boot-managed Spring Kafka
+  4.1.1 and Kafka client 4.2.1. Messages use the order UUID string as key and the
+  exact stored outbox payload as value with `acks=all` and finite acknowledgement
+  waits.
+- Each cycle reads a deterministic bounded batch in a short database transaction,
+  sends outside the transaction, then conditionally records success or persisted
+  capped exponential backoff in a separate transaction. A failed row does not stop
+  later eligible rows.
+- An in-process nonblocking lock prevents overlapping cycles within one service.
+  Version one deliberately runs one instance per service and provides at-least-once
+  delivery; consumer deduplication handles a crash after send and before marking.
+- Real PostgreSQL 18.1 and `apache/kafka-native:4.1.1` tests in both services cover
+  bounded acknowledged publishing, failure/backoff with row continuation, stable
+  send-before-mark replay, and actual broker pause/recovery through the same producer.
+- Independent review requested the real broker outage evidence, then approved the
+  focused fix with no Critical or Important findings. The implementer Java 25 gate
+  passed all six modules and 58 tests. Fresh controller verification passed the same
+  six modules and 58 tests with zero failures, errors, or skips; Docker Desktop host
+  latency extended that run to 23:20.

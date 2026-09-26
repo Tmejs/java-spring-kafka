@@ -59,3 +59,35 @@ both services `messaging/OutboxPublisherIT.java`; Kafka configuration in applica
   records if one fails. Preserve IDs and payload across attempts.
 - [ ] Run outage/recovery tests and `./mvnw verify`; commit/push:
   `feat: publish transactional outbox events to Kafka`.
+
+## Execution context
+
+- Baseline is reviewed and remotely synchronized commit `6e30cba`: Java 25,
+  Spring Boot 4.1.1, PostgreSQL/Flyway persistence, JWT security, and atomic order
+  creation with a pending `orders.v1` outbox row. The local reactor has 50 tests.
+- Java 25 is active through SDKMAN. There is no GitHub Actions pipeline; local
+  `./mvnw -B verify` is the required gate. Docker is available for Testcontainers.
+- Add Spring Kafka consistently to both service modules and use Spring Boot's
+  managed compatible dependency versions. Select and pin an Apache Kafka container
+  image compatible with the Testcontainers API in this build; record the actual
+  version and rationale in the task report.
+- Preserve the V1 schemas already pushed. Any needed attempt/backoff columns must
+  be added through `V2__...sql` migrations in both service-owned databases.
+- The publisher boundary must be testable without scheduling: expose one bounded
+  publish-cycle method and let the scheduler call it. Tests should invoke the cycle
+  deterministically and use Awaitility for broker results.
+- Do not hold a database transaction open while awaiting Kafka acknowledgement.
+  Claim/select work in a short transaction, perform the send outside it, then mark
+  success or failure in a separate transaction. Prevent overlapping scheduled runs
+  within one instance and document the single-instance v1 assumption if cross-node
+  leasing is deferred.
+- Publish key and value as strings: key is the order UUID, value is the exact stored
+  payload. Preserve event ID and payload across retries and send-before-mark replay.
+- One failed row must not prevent other eligible rows in the same bounded batch.
+  Use capped exponential backoff based on persisted attempt count and next-attempt
+  time. Avoid unbounded metric labels; detailed identifiers belong in logs.
+- Cover both service implementations. Shared source is acceptable only if it keeps
+  module ownership and configuration clear; do not add task 6 consumers yet.
+- Parent owns ledger, acceptance matrix, briefs, review artifacts, and pushes.
+  Commit implementation locally after focused tests and a full local verification;
+  do not push.

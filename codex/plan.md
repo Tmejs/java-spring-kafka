@@ -229,19 +229,19 @@ both services `messaging/OutboxPublisherIT.java`; Kafka configuration in applica
 **Consumes:** pending outbox records containing event ID, order ID, topic, payload.
 **Produces:** acknowledged messages on `orders.v1` and `reservation-results.v1`.
 
-- [ ] Write real Kafka/PostgreSQL tests proving success marks published, failed
+- [x] Write real Kafka/PostgreSQL tests proving success marks published, failed
   send leaves pending, and restart after send-before-mark republishes the same ID.
   ```java
   assertThat(publishedCopies).allMatch(e -> e.eventId().equals(originalEventId));
   assertThat(outboxRow.publishedAt()).isNotNull();
   ```
-- [ ] Configure string key/value producers and broker acknowledgement. Poll bounded
+- [x] Configure string key/value producers and broker acknowledgement. Poll bounded
   batches on a fixed delay, send keyed by order UUID, await acknowledgement with a
   timeout, then mark published. Persist attempt count/next-attempt time on failure.
-- [ ] Keep broker sends outside the database transaction. Schedule one publisher
+- [x] Keep broker sends outside the database transaction. Schedule one publisher
   per service instance, capped exponential backoff, and continue other eligible
   records if one fails. Preserve IDs and payload across attempts.
-- [ ] Run outage/recovery tests and `./mvnw verify`; commit/push:
+- [x] Run outage/recovery tests and `./mvnw verify`; commit/push:
   `feat: publish transactional outbox events to Kafka`.
 
 ## 6. Atomic inventory reservation

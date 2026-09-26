@@ -140,3 +140,24 @@ with zero order, idempotency, or outbox persistence.
 Task 4: complete (commits d2e0e17 and 7438dbc; independent review clean after one
 fix round). Fresh controller-owned SDKMAN Temurin 25.0.4 `./mvnw -B verify` PASS:
 six reactor modules, 50 tests, zero failures/errors/skips.
+Task 4 remote checkpoint: local and remote SHA matched at 6e30cba after review
+records were committed and pushed.
+Task 5: in progress; base 6e30cba; implementer kafka_outbox.
+Task 5: locally implemented in 7648f33. Full SDKMAN Java 25 reactor verification
+PASS: six modules, 56 tests, zero failures/errors/skips. Independent reviewer
+kafka_outbox_review dispatched against 6e30cba..7648f33.
+Task 5 review: fix round 1/5 for Important missing real broker outage/recovery
+evidence. Invalid-topic failure proves persistence/continuation but not broker
+unavailability, acknowledgement timeout, or recovery on the same producer.
+Task 5 review: minor (deferred): bounded-batch tests do not explicitly force equal
+timestamps to prove the UUID tie-break; publishers are intentionally duplicated
+between service modules and must be kept behaviorally aligned.
+Task 5: fix round 1/5 addressed in aaeb941. Both service suites pause/resume the
+real Kafka container on the same bootstrap address and prove finite timeout,
+persisted pending/backoff state, same-publisher recovery, exact key/payload, and
+published marking. Scoped re-review approved with zero open Critical/Important.
+Task 5: complete (commits 7648f33 and aaeb941; review clean after one fix round).
+Implementer full SDKMAN Temurin 25.0.4 `./mvnw -B verify` PASS: six modules,
+58 tests, zero failures/errors/skips. Fresh controller-owned verification also
+PASS: six modules, 58 tests, zero failures/errors/skips. Docker Desktop startup and
+credential-helper latency extended the controller run to 23:20 without test failures.
