@@ -18,6 +18,8 @@ import io.github.tmejs.reservation.client.orders.model.OrderItem;
 import io.github.tmejs.reservation.client.orders.model.OrderStatus;
 import io.github.tmejs.reservation.client.orders.model.RejectionReason;
 import io.github.tmejs.reservation.events.EventCodec;
+import io.github.tmejs.reservation.events.EventMetadata;
+import io.github.tmejs.reservation.events.StockRejected;
 import io.github.tmejs.reservation.orders.OrderApplication;
 import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
 import java.io.IOException;
@@ -76,6 +78,9 @@ class OrderCreationIT extends OrderPostgresIntegrationTest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    @Autowired
+    private OrderOutcomeService outcomes;
+
     @BeforeEach
     void clearOrders() {
         jdbc.execute("truncate table order_items, idempotency_keys, outbox, processed_events, orders cascade");
@@ -103,9 +108,14 @@ class OrderCreationIT extends OrderPostgresIntegrationTest {
         OrdersApi alice = api("alice-subject");
 
         ApiResponse<Order> first = alice.createOrderWithHttpInfo("replay-key", firstRequest);
-        jdbc.update(
-                "update orders set status = 'REJECTED', rejection_reason = 'INSUFFICIENT_STOCK' where id = ?",
-                first.getData().getId());
+        UUID createdEventId = jdbc.queryForObject(
+                "select event_id from outbox where order_id = ?", UUID.class, first.getData().getId());
+        outcomes.reject(new StockRejected(
+                new EventMetadata(
+                        UUID.randomUUID(), EventCodec.STOCK_REJECTED, EventCodec.SCHEMA_VERSION,
+                        FIXED_TIME.plusSeconds(1), first.getData().getId()),
+                createdEventId,
+                "INSUFFICIENT_STOCK"));
         ApiResponse<Order> replay = alice.createOrderWithHttpInfo("replay-key", reorderedRequest);
 
         assertThat(first.getStatusCode()).isEqualTo(202);

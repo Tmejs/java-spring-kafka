@@ -59,7 +59,7 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
         KAFKA.start();
         try (Admin admin = Admin.create(Map.of(
                 AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers()))) {
-            admin.createTopics(List.of(new NewTopic(SOURCE, 1, (short) 1), new NewTopic(DLT, 1, (short) 1)))
+            admin.createTopics(List.of(new NewTopic(SOURCE, 2, (short) 1), new NewTopic(DLT, 1, (short) 1)))
                     .all().get(10, TimeUnit.SECONDS);
         } catch (Exception exception) {
             throw new ExceptionInInitializerError(exception);
@@ -89,15 +89,16 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
     void retriesMalformedJsonFourTotalDeliveriesThenPublishesOriginalToDltAndCommitsOffset() throws Exception {
         String key = UUID.randomUUID().toString();
         String payload = "{not-json";
-        var sent = kafka.send(new ProducerRecord<>(SOURCE, key, payload)).get(10, TimeUnit.SECONDS);
+        var sent = kafka.send(new ProducerRecord<>(SOURCE, 1, key, payload)).get(10, TimeUnit.SECONDS);
 
         ConsumerRecord<String, String> dead = consumeMatching(DLT, key, Duration.ofSeconds(12));
 
         assertThat(dead.key()).isEqualTo(key);
         assertThat(dead.value()).isEqualTo(payload);
+        assertThat(dead.partition()).isZero();
         assertRetrySchedule(key);
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
-                assertThat(committedOffset()).isGreaterThanOrEqualTo(sent.getRecordMetadata().offset() + 1));
+                assertThat(committedOffset(1)).isGreaterThanOrEqualTo(sent.getRecordMetadata().offset() + 1));
         assertThat(jdbc.queryForObject("select count(*) from processed_events", Integer.class)).isZero();
     }
 
@@ -153,7 +154,8 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
                 assertThat(retryProbe.attempts(key)).hasSizeGreaterThanOrEqualTo(5);
                 assertThat(retryProbe.recoveryFailures()).isPositive();
             });
-            assertThat(committedOffset()).isLessThan(sent.getRecordMetadata().offset() + 1);
+            assertThat(committedOffset(sent.getRecordMetadata().partition()))
+                    .isLessThan(sent.getRecordMetadata().offset() + 1);
         } finally {
             ensureTopic(DLT);
         }
@@ -161,19 +163,31 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
     }
 
     @Test
-    void consumesResultThroughCommittedOutcomeTransaction() throws Exception {
+    void redeliversIdenticalResultThroughKafkaAfterCommitWithoutDuplicatingOutcome() throws Exception {
         Source source = pendingOrder();
         var result = new StockReserved(
                 new EventMetadata(UUID.randomUUID(), EventCodec.STOCK_RESERVED, 1, Instant.now(), source.orderId()),
                 source.createdEventId());
 
-        kafka.send(new ProducerRecord<>(SOURCE, source.orderId().toString(), codec.encode(result)))
+        String payload = codec.encode(result);
+        var first = kafka.send(new ProducerRecord<>(SOURCE, source.orderId().toString(), payload))
                 .get(10, TimeUnit.SECONDS);
 
         await().atMost(Duration.ofSeconds(8)).untilAsserted(() -> {
             assertThat(status(source.orderId())).isEqualTo("CONFIRMED");
             assertThat(jdbc.queryForObject("select count(*) from processed_events", Integer.class)).isOne();
+            assertThat(committedOffset(first.getRecordMetadata().partition()))
+                    .isGreaterThanOrEqualTo(first.getRecordMetadata().offset() + 1);
         });
+
+        var redelivery = kafka.send(new ProducerRecord<>(SOURCE, source.orderId().toString(), payload))
+                .get(10, TimeUnit.SECONDS);
+
+        await().atMost(Duration.ofSeconds(8)).untilAsserted(() ->
+                assertThat(committedOffset(redelivery.getRecordMetadata().partition()))
+                        .isGreaterThanOrEqualTo(redelivery.getRecordMetadata().offset() + 1));
+        assertThat(status(source.orderId())).isEqualTo("CONFIRMED");
+        assertThat(jdbc.queryForObject("select count(*) from processed_events", Integer.class)).isOne();
     }
 
     private Source pendingOrder() {
@@ -207,11 +221,12 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
         }
     }
 
-    private long committedOffset() throws Exception {
+    private long committedOffset(int partition) throws Exception {
         try (Admin admin = admin()) {
             var offsets = admin.listConsumerGroupOffsets(GROUP).partitionsToOffsetAndMetadata()
                     .get(5, TimeUnit.SECONDS);
-            return offsets.getOrDefault(new TopicPartition(SOURCE, 0), new org.apache.kafka.clients.consumer.OffsetAndMetadata(0)).offset();
+            return offsets.getOrDefault(new TopicPartition(SOURCE, partition),
+                    new org.apache.kafka.clients.consumer.OffsetAndMetadata(0)).offset();
         }
     }
 

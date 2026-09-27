@@ -15,11 +15,17 @@
 - Unknown orders, malformed contracts, unsupported versions, wrong causation, and
   terminal conflicts remain technical failures. They never create a `REJECTED`
   business result.
+- `StockRejected.reason` is restricted to the two values in the public contract:
+  `UNKNOWN_PRODUCT` and `INSUFFICIENT_STOCK`. Any other value fails before an order
+  or processed-event row changes. An accepted result is also exercised through the
+  generated API client to prove the public GET mapping remains readable.
 - Each service owns one `CommonErrorHandler`. It uses `FixedBackOff(1000, 3)` for
-  four total deliveries and publishes the original record to `<source>.DLT` on the
-  source partition. DLT sends use `setFailIfSendResultIsError(true)` and a bounded
-  acknowledgement wait. Record acknowledgement remains enabled and recovered
-  offsets are not committed when DLT publication fails.
+  four total deliveries and publishes the original record to `<source>.DLT` with
+  its key and value unchanged. DLT sends use `setFailIfSendResultIsError(true)` and
+  a bounded acknowledgement wait. Record acknowledgement remains enabled and
+  recovered offsets are not committed when DLT publication fails.
+- DLT records use partition `-1`, allowing Kafka to select a valid destination
+  partition even when the source and DLT have different partition counts.
 
 ## TDD evidence
 
@@ -42,16 +48,26 @@
   disable broker auto-creation, delete the DLT, observe the acknowledged producer
   failure and another delivery cycle, and assert the source offset is still below
   the produced offset plus one before restoring the DLT.
+- Review RED: an unknown but bounded rejection reason previously changed the order
+  to `REJECTED` and claimed its event. GREEN: the service now rejects values outside
+  the OpenAPI enum before persistence; the focused regression confirms the order
+  stays `PENDING` with zero processed claims.
+- Review evidence publishes malformed records explicitly to source partition 1 in
+  both services while the DLT has one partition. Recovery lands on DLT partition 0
+  with the exact original key/value and commits source partition 1. Orders also
+  publishes an identical valid result twice through Kafka, waits for the first DB
+  commit before redelivery, and proves the second source offset commits while the
+  terminal state and single processed-event row remain stable.
 
 ## Verification
 
 - Focused `EventCodecTest`: 5 tests, all passing.
-- Focused `OrderOutcomeIT`: 10 tests, all passing, including concurrent opposite
+- Focused `OrderOutcomeIT`: 11 tests, all passing, including concurrent opposite
   outcomes.
 - Focused real-broker `DeadLetterIT`: Orders 5 tests and Inventory 4 tests, all
   passing.
-- Final gate: SDKMAN Temurin `25.0.4`, `./mvnw -B verify`, 90 tests, zero failures,
-  zero errors, zero skipped; reactor `BUILD SUCCESS` in 1 minute 46 seconds.
+- Final gate: SDKMAN Temurin `25.0.4`, `./mvnw -B verify`, 91 tests, zero failures,
+  zero errors, zero skipped; reactor `BUILD SUCCESS`.
 
 ## Deliberate limits
 

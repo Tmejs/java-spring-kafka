@@ -21,7 +21,7 @@ public class KafkaErrorHandlingConfiguration {
             ObjectProvider<RetryListener> retryListeners,
             @Value("${reservation.kafka.dlt-ack-timeout:10s}") Duration dltAckTimeout) {
         var recoverer = new DeadLetterPublishingRecoverer(
-                kafka, (record, exception) -> new TopicPartition(record.topic() + ".DLT", record.partition()));
+                kafka, (record, exception) -> new TopicPartition(record.topic() + ".DLT", -1));
         recoverer.setFailIfSendResultIsError(true);
         recoverer.setWaitForSendResultTimeout(dltAckTimeout);
         var handler = new DefaultErrorHandler(recoverer, new FixedBackOff(1_000L, 3L));

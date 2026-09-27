@@ -38,8 +38,8 @@ public class OrderOutcomeService {
     @Transactional
     public void reject(StockRejected event) {
         validate(event == null ? null : event.metadata(), EventCodec.STOCK_REJECTED, event == null ? null : event.causationId());
-        if (event.reason() == null || event.reason().isBlank() || event.reason().length() > 64) {
-            throw new IllegalArgumentException("Rejection reason must contain between 1 and 64 characters");
+        if (!"UNKNOWN_PRODUCT".equals(event.reason()) && !"INSUFFICIENT_STOCK".equals(event.reason())) {
+            throw new IllegalArgumentException("Unsupported rejection reason");
         }
         apply(event.metadata(), event.causationId(), event.reason());
     }

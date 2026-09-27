@@ -58,7 +58,7 @@ class DeadLetterIT extends InventoryPostgresIntegrationTest {
     static {
         KAFKA.start();
         try (Admin admin = admin()) {
-            admin.createTopics(List.of(new NewTopic(SOURCE, 1, (short) 1), new NewTopic(DLT, 1, (short) 1)))
+            admin.createTopics(List.of(new NewTopic(SOURCE, 2, (short) 1), new NewTopic(DLT, 1, (short) 1)))
                     .all().get(10, TimeUnit.SECONDS);
         } catch (Exception exception) {
             throw new ExceptionInInitializerError(exception);
@@ -90,15 +90,16 @@ class DeadLetterIT extends InventoryPostgresIntegrationTest {
     void malformedJsonRetriesThreeTimesThenPublishesOriginalAndCommitsOffset() throws Exception {
         String key = UUID.randomUUID().toString();
         String payload = "{not-json";
-        var sent = kafka.send(new ProducerRecord<>(SOURCE, key, payload)).get(10, TimeUnit.SECONDS);
+        var sent = kafka.send(new ProducerRecord<>(SOURCE, 1, key, payload)).get(10, TimeUnit.SECONDS);
 
         ConsumerRecord<String, String> dead = consumeMatching(key, Duration.ofSeconds(12));
 
         assertThat(dead.key()).isEqualTo(key);
         assertThat(dead.value()).isEqualTo(payload);
+        assertThat(dead.partition()).isZero();
         assertRetrySchedule(key);
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
-                assertThat(committedOffset()).isGreaterThanOrEqualTo(sent.getRecordMetadata().offset() + 1));
+                assertThat(committedOffset(1)).isGreaterThanOrEqualTo(sent.getRecordMetadata().offset() + 1));
         assertThat(count("reservations")).isZero();
         assertThat(count("processed_events")).isZero();
     }
@@ -160,7 +161,8 @@ class DeadLetterIT extends InventoryPostgresIntegrationTest {
                 assertThat(retryProbe.attempts(key)).hasSizeGreaterThanOrEqualTo(5);
                 assertThat(retryProbe.recoveryFailures()).isPositive();
             });
-            assertThat(committedOffset()).isLessThan(sent.getRecordMetadata().offset() + 1);
+            assertThat(committedOffset(sent.getRecordMetadata().partition()))
+                    .isLessThan(sent.getRecordMetadata().offset() + 1);
         } finally {
             ensureTopic(DLT);
         }
@@ -180,11 +182,11 @@ class DeadLetterIT extends InventoryPostgresIntegrationTest {
         }
     }
 
-    private long committedOffset() throws Exception {
+    private long committedOffset(int partition) throws Exception {
         try (Admin admin = admin()) {
             var offsets = admin.listConsumerGroupOffsets(GROUP).partitionsToOffsetAndMetadata()
                     .get(5, TimeUnit.SECONDS);
-            return offsets.getOrDefault(new TopicPartition(SOURCE, 0),
+            return offsets.getOrDefault(new TopicPartition(SOURCE, partition),
                     new org.apache.kafka.clients.consumer.OffsetAndMetadata(0)).offset();
         }
     }

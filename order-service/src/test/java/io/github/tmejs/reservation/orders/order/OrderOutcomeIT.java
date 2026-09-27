@@ -158,6 +158,19 @@ class OrderOutcomeIT extends OrderPostgresIntegrationTest {
     }
 
     @Test
+    void unknownRejectionReasonIsTechnicalAndLeavesPendingOrderUnclaimed() {
+        Source source = pendingOrder();
+
+        assertThatThrownBy(() -> outcomes.reject(rejected(source, UUID.randomUUID(), "WAREHOUSE_OFFLINE")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("rejection reason");
+
+        assertThat(status(source.orderId())).isEqualTo("PENDING");
+        assertThat(reason(source.orderId())).isNull();
+        assertThat(processedEventCount()).isZero();
+    }
+
+    @Test
     void concurrentOppositeOutcomesSerializeToOneTerminalDecision() throws Exception {
         Source source = pendingOrder();
         StockReserved reserved = reserved(source, UUID.randomUUID());
