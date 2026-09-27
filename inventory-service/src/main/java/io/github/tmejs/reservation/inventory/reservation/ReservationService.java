@@ -121,7 +121,8 @@ public class ReservationService {
 
     private static List<OrderLine> validateAndCanonicalize(OrderCreated event) {
         if (event == null || event.metadata() == null || event.metadata().eventId() == null
-                || event.metadata().orderId() == null || event.items() == null || event.items().isEmpty()) {
+                || event.metadata().occurredAt() == null || event.metadata().orderId() == null
+                || event.items() == null || event.items().isEmpty()) {
             throw new IllegalArgumentException("OrderCreated metadata and items are required");
         }
         if (!EventCodec.ORDER_CREATED.equals(event.metadata().eventType())

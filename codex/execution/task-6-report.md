@@ -62,8 +62,23 @@ Final verification:
 ```text
 ./mvnw -B verify
 BUILD SUCCESS
-69 tests, 0 failures, 0 errors, 0 skipped
+70 tests, 0 failures, 0 errors, 0 skipped
 ```
+
+## Review fix round 1
+
+Review found that `metadata.occurredAt` was not included in the required metadata
+guard. A malformed event could therefore reach the reservation transaction and
+mutate stock.
+
+RED: `missingOccurredAtIsAContractErrorWithNoWrites` failed because no exception
+was raised. GREEN: validation now rejects a null occurrence timestamp before the
+order lock, event claim, product lock, or write. The regression asserts the product
+quantity remains unchanged and reservations, processed events, and outbox stay
+empty.
+
+- Focused `ReservationIT`: 12 tests, 0 failures, 0 errors, 0 skipped.
+- Fresh full `./mvnw -B verify`: 70 tests, 0 failures, 0 errors, 0 skipped.
 
 ## Constraints and limitations
 

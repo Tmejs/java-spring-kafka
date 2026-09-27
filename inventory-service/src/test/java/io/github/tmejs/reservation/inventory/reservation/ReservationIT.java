@@ -187,6 +187,24 @@ class ReservationIT extends InventoryPostgresIntegrationTest {
     }
 
     @Test
+    void missingOccurredAtIsAContractErrorWithNoWrites() {
+        UUID product = product(5);
+        OrderCreated malformed = new OrderCreated(
+                new EventMetadata(
+                        UUID.randomUUID(), EventCodec.ORDER_CREATED, EventCodec.SCHEMA_VERSION, null, UUID.randomUUID()),
+                List.of(new OrderLine(product, 2)));
+
+        assertThatThrownBy(() -> reservations.reserve(malformed))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("metadata");
+
+        assertThat(stock(product)).isEqualTo(5);
+        assertThat(count("reservations")).isZero();
+        assertThat(count("processed_events")).isZero();
+        assertThat(count("outbox")).isZero();
+    }
+
+    @Test
     void changedItemsForAnExistingOrderAreAContractErrorAndRollBackEventClaim() {
         UUID product = product(5);
         UUID orderId = UUID.randomUUID();
