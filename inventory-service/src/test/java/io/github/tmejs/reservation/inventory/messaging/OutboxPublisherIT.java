@@ -137,14 +137,17 @@ class OutboxPublisherIT extends InventoryPostgresIntegrationTest {
             await().atMost(Duration.ofSeconds(10)).until(() -> !isKafkaPaused());
         }
 
-        jdbc.update("update outbox set next_attempt_at = now() where id = ?", original.rowId());
-        publisher.publishBatch();
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            jdbc.update("update outbox set next_attempt_at = now() where id = ?", original.rowId());
+            publisher.publishBatch();
+            assertThat(jdbc.queryForObject(
+                            "select published_at from outbox where id = ?", Instant.class, original.rowId()))
+                    .isNotNull();
+        });
 
         assertThat(consume(1, copy -> copy.payload().equals(original.payload())))
                 .allMatch(copy -> copy.key().equals(original.orderId().toString()))
                 .allMatch(copy -> copy.payload().equals(original.payload()));
-        assertThat(jdbc.queryForObject("select published_at from outbox where id = ?", Instant.class, original.rowId()))
-                .isNotNull();
     }
 
     private boolean isKafkaPaused() {

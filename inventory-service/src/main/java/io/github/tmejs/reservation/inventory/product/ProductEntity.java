@@ -42,4 +42,11 @@ public class ProductEntity {
     void setAvailableQuantity(int availableQuantity) {
         this.availableQuantity = availableQuantity;
     }
+
+    public void reserve(int quantity) {
+        if (quantity < 1 || quantity > availableQuantity) {
+            throw new IllegalArgumentException("Reservation quantity exceeds available stock");
+        }
+        availableQuantity -= quantity;
+    }
 }

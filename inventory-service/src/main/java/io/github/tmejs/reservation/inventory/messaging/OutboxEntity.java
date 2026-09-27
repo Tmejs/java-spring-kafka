@@ -46,6 +46,25 @@ public class OutboxEntity {
 
     protected OutboxEntity() {}
 
+    public OutboxEntity(
+            UUID id,
+            UUID eventId,
+            UUID orderId,
+            String eventType,
+            String topic,
+            String payload,
+            Instant createdAt) {
+        this.id = id;
+        this.eventId = eventId;
+        this.orderId = orderId;
+        this.eventType = eventType;
+        this.topic = topic;
+        this.payload = payload;
+        this.createdAt = createdAt;
+        this.nextAttemptAt = createdAt;
+        this.attemptCount = 0;
+    }
+
     public UUID getId() {
         return id;
     }
