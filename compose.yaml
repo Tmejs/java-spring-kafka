@@ -1,0 +1,184 @@
+name: reservation
+
+services:
+  postgres:
+    image: postgres:17.11-alpine3.24
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:?Copy .env.example to .env}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD in .env}
+      ORDERS_DB_USERNAME: ${ORDERS_DB_USERNAME:?Set ORDERS_DB_USERNAME in .env}
+      ORDERS_DB_PASSWORD: ${ORDERS_DB_PASSWORD:?Set ORDERS_DB_PASSWORD in .env}
+      INVENTORY_DB_USERNAME: ${INVENTORY_DB_USERNAME:?Set INVENTORY_DB_USERNAME in .env}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Set INVENTORY_DB_PASSWORD in .env}
+      KEYCLOAK_DB_USERNAME: ${KEYCLOAK_DB_USERNAME:?Set KEYCLOAK_DB_USERNAME in .env}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-init-databases.sh:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d postgres
+          && test "$$(psql -h 127.0.0.1 -U "$${POSTGRES_USER}" -d postgres -tAc
+          "SELECT count(*) FROM pg_database WHERE datname IN ('orders','inventory','keycloak')")" = "3"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  kafka-storage-init:
+    image: alpine:3.22.2
+    user: root
+    command: ["sh", "-c", "chown -R 1000:1000 /data"]
+    volumes:
+      - kafka-data:/data
+    restart: "no"
+
+  kafka:
+    image: apache/kafka-native:4.1.1
+    depends_on:
+      kafka-storage-init:
+        condition: service_completed_successfully
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9092"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+
+  kafka-init:
+    image: apache/kafka:4.1.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/init/init-topics.sh"]
+    volumes:
+      - ./infra/kafka/init-topics.sh:/init/init-topics.sh:ro
+    restart: "no"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4
+    command:
+      - start-dev
+      - --import-realm
+      - --hostname=http://localhost:8180
+      - --hostname-backchannel-dynamic=true
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USERNAME:?Set KEYCLOAK_DB_USERNAME in .env}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?Set KEYCLOAK_ADMIN_USERNAME in .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      ORDERS_DEMO_CLIENT_SECRET: ${ORDERS_DEMO_CLIENT_SECRET:?Set ORDERS_DEMO_CLIENT_SECRET in .env}
+      INVENTORY_DEMO_CLIENT_SECRET: ${INVENTORY_DEMO_CLIENT_SECRET:?Set INVENTORY_DEMO_CLIENT_SECRET in .env}
+      MONITORING_CLIENT_SECRET: ${MONITORING_CLIENT_SECRET:?Set MONITORING_CLIENT_SECRET in .env}
+    ports:
+      - "127.0.0.1:8180:8080"
+    volumes:
+      - ./infra/keycloak/reservation-realm.json:/opt/keycloak/data/import/reservation-realm.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - /bin/bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000;
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3;
+          grep -q ' 200 ' <&3
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  order-service:
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/orders
+      DB_USERNAME: ${ORDERS_DB_USERNAME:?Set ORDERS_DB_USERNAME in .env}
+      DB_PASSWORD: ${ORDERS_DB_PASSWORD:?Set ORDERS_DB_PASSWORD in .env}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SECURITY_ISSUER_URI: ${SECURITY_ISSUER_URI:-http://localhost:8180/realms/reservation}
+      SECURITY_JWK_SET_URI: ${SECURITY_JWK_SET_URI:-http://keycloak:8080/realms/reservation/protocol/openid-connect/certs}
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9080:9080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9080/actuator/health/readiness"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    restart: unless-stopped
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: inventory-service/Dockerfile
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/inventory
+      DB_USERNAME: ${INVENTORY_DB_USERNAME:?Set INVENTORY_DB_USERNAME in .env}
+      DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Set INVENTORY_DB_PASSWORD in .env}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SECURITY_ISSUER_URI: ${SECURITY_ISSUER_URI:-http://localhost:8180/realms/reservation}
+      SECURITY_JWK_SET_URI: ${SECURITY_JWK_SET_URI:-http://keycloak:8080/realms/reservation/protocol/openid-connect/certs}
+    ports:
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:9081:9081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9081/actuator/health/readiness"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  kafka-data:

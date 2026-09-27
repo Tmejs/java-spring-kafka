@@ -1,0 +1,7 @@
+.git
+.github
+.idea
+.env
+**/target
+**/*.iml
+codex/execution/*.diff
