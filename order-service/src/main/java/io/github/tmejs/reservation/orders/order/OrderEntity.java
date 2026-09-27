@@ -68,4 +68,30 @@ public class OrderEntity {
     List<OrderItemEntity> getItems() {
         return Collections.unmodifiableList(items);
     }
+
+    void confirm(Instant occurredAt) {
+        transitionTo("CONFIRMED", null, occurredAt);
+    }
+
+    void reject(String reason, Instant occurredAt) {
+        transitionTo("REJECTED", reason, occurredAt);
+    }
+
+    void verifyOutcome(String outcome, String reason) {
+        if (!"PENDING".equals(status) && !outcome.equals(status)) {
+            throw new IllegalStateException("Order already has contradictory terminal outcome " + status);
+        }
+        if ("REJECTED".equals(status) && !java.util.Objects.equals(reason, rejectionReason)) {
+            throw new IllegalStateException("Order already has a different rejection reason");
+        }
+    }
+
+    private void transitionTo(String outcome, String reason, Instant occurredAt) {
+        verifyOutcome(outcome, reason);
+        if ("PENDING".equals(status)) {
+            status = outcome;
+            rejectionReason = reason;
+            updatedAt = occurredAt;
+        }
+    }
 }

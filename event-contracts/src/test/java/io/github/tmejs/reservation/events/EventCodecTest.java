@@ -67,6 +67,22 @@ class EventCodecTest {
                 .hasMessageContaining("2");
     }
 
+    @Test
+    void dispatchesReservationResultsByExplicitEventType() {
+        var reserved = new StockReserved(metadata("StockReserved"), CAUSATION_ID);
+        var rejected = new StockRejected(metadata("StockRejected"), CAUSATION_ID, "INSUFFICIENT_STOCK");
+
+        assertThat(codec.decodeReservationResult(codec.encode(reserved))).isEqualTo(reserved);
+        assertThat(codec.decodeReservationResult(codec.encode(rejected))).isEqualTo(rejected);
+        assertThatThrownBy(() -> codec.decodeReservationResult(codec.encode(
+                        new OrderCreated(metadata("OrderCreated"), List.of(new OrderLine(PRODUCT_ID, 1))))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reservation result");
+        assertThatThrownBy(() -> codec.decodeReservationResult("{\"metadata\":{}}"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reservation result");
+    }
+
     private static EventMetadata metadata(String eventType) {
         return new EventMetadata(EVENT_ID, eventType, 1, OCCURRED_AT, ORDER_ID);
     }

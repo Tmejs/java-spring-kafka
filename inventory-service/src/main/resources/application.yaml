@@ -19,6 +19,8 @@ spring:
       acks: all
       properties:
         enable.idempotence: true
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -41,6 +43,7 @@ reservation:
   kafka:
     orders-topic: orders.v1
     consumer-group: inventory-reservations
+    dlt-ack-timeout: 10s
   outbox:
     batch-size: 100
     fixed-delay: 1s

@@ -11,6 +11,10 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 public interface OutboxRepository extends JpaRepository<OutboxEntity, UUID> {
+    @Query("select o.eventId from OutboxEntity o where o.orderId = :orderId and o.eventType = :eventType")
+    java.util.Optional<UUID> findEventIdByOrderAndType(
+            @Param("orderId") UUID orderId, @Param("eventType") String eventType);
+
     @Transactional(readOnly = true)
     List<OutboxEntity> findByPublishedAtIsNullAndNextAttemptAtLessThanEqualOrderByCreatedAtAscIdAsc(
             Instant eligibleAt, Pageable page);

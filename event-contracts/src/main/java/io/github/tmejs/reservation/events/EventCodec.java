@@ -42,6 +42,26 @@ public final class EventCodec {
         return decode(json, StockRejected.class, StockRejected::metadata, STOCK_REJECTED);
     }
 
+    public Object decodeReservationResult(String json) {
+        final String eventType;
+        try {
+            var root = objectMapper.readTree(json);
+            var metadata = root == null ? null : root.get("metadata");
+            var typeNode = metadata == null ? null : metadata.get("eventType");
+            eventType = typeNode == null ? null : typeNode.asText();
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("Malformed event JSON", exception);
+        }
+        if (eventType == null) {
+            throw new IllegalArgumentException("Expected a supported reservation result event type");
+        }
+        return switch (eventType) {
+            case STOCK_RESERVED -> decodeStockReserved(json);
+            case STOCK_REJECTED -> decodeStockRejected(json);
+            default -> throw new IllegalArgumentException("Expected a supported reservation result event type");
+        };
+    }
+
     private <T> T decode(
             String json, Class<T> eventClass, Function<T, EventMetadata> metadataExtractor, String expectedType) {
         final T event;
