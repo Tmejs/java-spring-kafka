@@ -58,21 +58,22 @@ fixtures are implemented in the named test class alongside the test.
 
 **Files:** root `pom.xml`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/maven-wrapper.properties`,
 `.gitignore`; `pom.xml` in all five modules; `O/OrderApplication.java`,
-`I/InventoryApplication.java`; `.github/workflows/verify.yml`.
+`I/InventoryApplication.java`.
 
 **Produces:** five-module reactor compiling with Java 25; executable service jars.
 
-- [ ] Inspect local Java and Docker availability. Verify compatible stable versions
+- [x] Inspect local Java and Docker availability. Verify compatible stable versions
   using official dependency documentation, pin them, and record choices in progress.
-- [ ] Create the parent and children; manage common versions centrally. Set
+- [x] Create the parent and children; manage common versions centrally. Set
   `<maven.compiler.release>25</maven.compiler.release>`. Configure Surefire for
   `*Test` and Failsafe `integration-test`/`verify` for `*IT`.
-- [ ] Add the two `@SpringBootApplication` entry points; apply Boot repackaging only
+- [x] Add the two `@SpringBootApplication` entry points; apply Boot repackaging only
   to executable services. Ignore `**/target/`, IDE output, and local secret files.
-- [ ] Add GitHub Actions using Java 25 and `./mvnw -B verify` on push/pull request.
-- [ ] Run `./mvnw -B verify`; expect all five modules successful. Record environment
+- [x] Install Temurin Java 25 through SDKMAN and use local `./mvnw -B verify`
+  before each pushed checkpoint. Do not maintain a GitHub Actions pipeline.
+- [x] Run `./mvnw -B verify`; expect all five modules successful. Record environment
   prerequisites honestly; never silently disable integration tests in later steps.
-- [ ] Commit/push: `build: initialize Java 25 Maven reactor`.
+- [x] Commit/push: `build: initialize Java 25 Maven reactor`.
 
 ## 2. Contract-first HTTP interfaces and clients
 
@@ -83,11 +84,11 @@ both service POMs; `O/config/OpenApiConfiguration.java`,
 **Produces:** `OrdersApi` operations `createOrder` and `getOrder`; `ProductsApi`
 operations `createProduct`, `listProducts`, `getProduct`, `addStock`.
 
-- [ ] Define UUID IDs, positive integer quantities, nonempty distinct order items,
+- [x] Define UUID IDs, positive integer quantities, nonempty distinct order items,
   order status/rejection reason, bounded pagination, and problem detail errors.
   Define POST orders as 202 with Location and required Idempotency-Key; define
   GET orders as 200/404 and conflict as 409. Product creation returns 201.
-- [ ] Use these stable paths and operation names:
+- [x] Use these stable paths and operation names:
   ```yaml
   /orders:
     post:
@@ -107,18 +108,18 @@ operations `createProduct`, `listProducts`, `getProduct`, `addStock`.
     post:
       operationId: addStock
   ```
-- [ ] Define OAuth2 authorization-code security, token/authorization URLs, 401/403
+- [x] Define OAuth2 authorization-code security, token/authorization URLs, 401/403
   problem responses, operation-level access rules, and PKCE Swagger settings.
   Generated clients accept access tokens supplied by callers.
-- [ ] Package contracts, unpack them during dependent modules' initialize phase,
+- [x] Package contracts, unpack them during dependent modules' initialize phase,
   and generate Spring interfaces and Java clients at generate-sources. Select a
   generator/library combination verified compatible with Boot 4; keep generated
   dependencies explicit. Do not hand-edit generated sources.
-- [ ] Serve the original YAML and configure Swagger UI to use it. Do not regenerate
+- [x] Serve the original YAML and configure Swagger UI to use it. Do not regenerate
   the public specification from annotations.
-- [ ] Run `./mvnw clean verify`; confirm both clients and server interfaces compile,
+- [x] Run `./mvnw clean verify`; confirm both clients and server interfaces compile,
   generated output stays under target, and the reactor works from a clean checkout.
-- [ ] Commit/push: `feat: generate APIs and clients from OpenAPI contracts`.
+- [x] Commit/push: `feat: generate APIs and clients from OpenAPI contracts`.
 
 ## 2a. Identity provider and resource-server security
 
@@ -132,11 +133,11 @@ RealmRoleConverter}.java`; both services `security/JwtValidationIT.java` and
 **Produces:** validated JWT principals, explicit role/scope authorization, and
 `CurrentOwner.subject()` derived only from the authenticated JWT `sub` claim.
 
-- [ ] Import a realm with CUSTOMER and INVENTORY_ADMIN roles, Alice/Bob/admin demo
+- [x] Import a realm with CUSTOMER and INVENTORY_ADMIN roles, Alice/Bob/admin demo
   users, a public Swagger client with exact redirect URIs and mandatory PKCE S256,
   narrowly scoped demo service accounts, and a monitoring client. Disable password
   grants. Audience mappers emit orders-api/inventory-api only where needed.
-- [ ] Write token tests using a test signing key and served JWKS: valid token passes;
+- [x] Write token tests using a test signing key and served JWKS: valid token passes;
   wrong signature, issuer, audience, expired token, and future not-before return 401.
   Add authorization tests using mock JWTs for each route/role and a real Keycloak
   Testcontainer test proving imported realm client credentials produce valid tokens.
@@ -145,15 +146,15 @@ RealmRoleConverter}.java`; both services `security/JwtValidationIT.java` and
   assertThat(customerStockMutationStatus).isEqualTo(403);
   assertThat(wrongAudienceStatus).isEqualTo(401);
   ```
-- [ ] Implement stateless bearer-only security chains and explicit audience/issuer
+- [x] Implement stateless bearer-only security chains and explicit audience/issuer
   validation. Map configured realm roles; deny unmatched routes. Permit local
   Swagger/spec resources and minimal health; protect metrics with metrics.read.
   Disable CSRF only on the stateless bearer API/management chains; configure
   specific origins if needed. Never log Authorization or raw tokens.
-- [ ] Add owner isolation assertions to checkpoints 3/4 when controllers exist:
+- [x] Add owner isolation assertions to checkpoints 3/4 when controllers exist:
   Alice creates/reads her order; Bob receives 404; each can use the same idempotency
   key independently. No role grants implicit access to another customer's order.
-- [ ] Run focused security tests and `./mvnw verify`; record the imported realm and
+- [x] Run focused security tests and `./mvnw verify`; record the imported realm and
   JWT checks. Commit/push: `feat: secure APIs with Keycloak JWT authentication`.
 
 ## 3. Service-owned databases and product API
@@ -168,22 +169,22 @@ ProductService,ProductsController}.java`; each service
 **Produces:** migrated schemas and product operations. `ProductService.addStock(UUID,
 int)` and reservation processing later use identical pessimistic row locks.
 
-- [ ] Write PostgreSQL-backed migration/startup tests and generated-client product
+- [x] Write PostgreSQL-backed migration/startup tests and generated-client product
   tests. Assert creation, list pagination, stock addition, invalid quantities, 404,
   and concurrent additions without lost updates.
   ```java
   assertThat(after.getAvailableQuantity()).isEqualTo(before + firstAdd + secondAdd);
   ```
-- [ ] Create order/items, idempotency, outbox, processed-event tables in Orders;
+- [x] Create order/items, idempotency, outbox, processed-event tables in Orders;
   products, reservations, outbox, processed-event tables in Inventory. Include
   unique event IDs, unique reservation order IDs, unique owner/key pairs,
   nonnegative stock checks, and pending-outbox indexes. Store outbox payload as text.
-- [ ] Set Hibernate `ddl-auto: validate`; include Flyway PostgreSQL support. Create
+- [x] Set Hibernate `ddl-auto: validate`; include Flyway PostgreSQL support. Create
   repositories and explicit generated-model mapping in thin controllers.
-- [ ] Lock stock updates, reject overflow, and implement problem detail responses
+- [x] Lock stock updates, reject overflow, and implement problem detail responses
   for validation, missing product, and conflicting requests. Test the real HTTP API.
-- [ ] Run focused ITs via Failsafe and `./mvnw verify`; expect migrations and APIs pass.
-- [ ] Commit/push: `feat: migrate service databases and expose inventory API`.
+- [x] Run focused ITs via Failsafe and `./mvnw verify`; expect migrations and APIs pass.
+- [x] Commit/push: `feat: migrate service databases and expose inventory API`.
 
 ## 4. Event contracts and atomic order creation
 
@@ -200,24 +201,24 @@ UUID orderId)`; `OrderCreated(EventMetadata metadata, List<OrderLine> items)`;
 `EventCodec.encode(Object)` returns JSON; explicit typed decode methods validate
 event type/version and reject unsupported versions without trusting class headers.
 
-- [ ] Write codec round-trip/malformed/version tests and HTTP creation tests for
+- [x] Write codec round-trip/malformed/version tests and HTTP creation tests for
   replay, changed payload, simultaneous same-key requests, empty/duplicate items.
   ```java
   assertThat(replayedOrderId).isEqualTo(firstOrderId);
   assertThat(orderCount).isEqualTo(1);
   assertThat(pendingOutboxCount).isEqualTo(1);
   ```
-- [ ] Canonicalize item order by product ID before hashing. Atomically claim the
+- [x] Canonicalize item order by product ID before hashing. Atomically claim the
   `(owner_subject, idempotency_key)` using PostgreSQL `INSERT ... ON CONFLICT DO NOTHING`; avoid
   catching a constraint violation and continuing an aborted transaction.
-- [ ] Save order, items, original response/fingerprint, and serialized OrderCreated
+- [x] Save order, items, original response/fingerprint, and serialized OrderCreated
   outbox entry in one transaction. A conflicting key returns 409; a matching key
   returns the original 202 body and Location even if order status has since changed.
-- [ ] Derive ownership from the authenticated JWT subject and persist it on orders.
+- [x] Derive ownership from the authenticated JWT subject and persist it on orders.
   Implement GET order with an owner-qualified query (404 for other owners),
   current status, and rejection reason. Test different subjects using the same key. Inject `Clock`
   for timestamps; use generated HTTP clients in actual endpoint tests.
-- [ ] Run focused tests and `./mvnw verify`; commit/push:
+- [x] Run focused tests and `./mvnw verify`; commit/push:
   `feat: create idempotent orders with transactional outbox`.
 
 ## 5. Kafka transport and outbox publishing
@@ -228,19 +229,19 @@ both services `messaging/OutboxPublisherIT.java`; Kafka configuration in applica
 **Consumes:** pending outbox records containing event ID, order ID, topic, payload.
 **Produces:** acknowledged messages on `orders.v1` and `reservation-results.v1`.
 
-- [ ] Write real Kafka/PostgreSQL tests proving success marks published, failed
+- [x] Write real Kafka/PostgreSQL tests proving success marks published, failed
   send leaves pending, and restart after send-before-mark republishes the same ID.
   ```java
   assertThat(publishedCopies).allMatch(e -> e.eventId().equals(originalEventId));
   assertThat(outboxRow.publishedAt()).isNotNull();
   ```
-- [ ] Configure string key/value producers and broker acknowledgement. Poll bounded
+- [x] Configure string key/value producers and broker acknowledgement. Poll bounded
   batches on a fixed delay, send keyed by order UUID, await acknowledgement with a
   timeout, then mark published. Persist attempt count/next-attempt time on failure.
-- [ ] Keep broker sends outside the database transaction. Schedule one publisher
+- [x] Keep broker sends outside the database transaction. Schedule one publisher
   per service instance, capped exponential backoff, and continue other eligible
   records if one fails. Preserve IDs and payload across attempts.
-- [ ] Run outage/recovery tests and `./mvnw verify`; commit/push:
+- [x] Run outage/recovery tests and `./mvnw verify`; commit/push:
   `feat: publish transactional outbox events to Kafka`.
 
 ## 6. Atomic inventory reservation
@@ -251,7 +252,7 @@ both services `messaging/OutboxPublisherIT.java`; Kafka configuration in applica
 **Interface:** `ReservationService.reserve(OrderCreated event)` returns void and
 commits the decision, stock changes, processed-event record, and result outbox.
 
-- [ ] Test multi-item success, unknown product, insufficient stock, no partial
+- [x] Test multi-item success, unknown product, insufficient stock, no partial
   reservation, identical duplicate event, different event ID for the same order,
   inconsistent repeated items, and competing orders:
   ```java
@@ -259,15 +260,15 @@ commits the decision, stock changes, processed-event record, and result outbox.
   assertThat(availableStock).isZero();
   assertThat(resultOutboxRows).isEqualTo(2); // one success and one rejection
   ```
-- [ ] Claim event/order with conflict-safe inserts and compare normalized item
+- [x] Claim event/order with conflict-safe inserts and compare normalized item
   fingerprints for repeated orders. Lock all existing product rows in sorted ID
   order; check every quantity before decrementing any stock.
-- [ ] Save a decision and one StockReserved/StockRejected outbox entry atomically.
+- [x] Save a decision and one StockReserved/StockRejected outbox entry atomically.
   Use bounded reasons UNKNOWN_PRODUCT and INSUFFICIENT_STOCK. Roll back all writes
   on technical failure. Duplicate deliveries do not create another result.
-- [ ] Listener delegates to the transactional service through a Spring proxy;
+- [x] Listener delegates to the transactional service through a Spring proxy;
   use record acknowledgement after successful return, never before DB commit.
-- [ ] Run concurrency/redelivery tests and `./mvnw verify`; commit/push:
+- [x] Run concurrency/redelivery tests and `./mvnw verify`; commit/push:
   `feat: reserve inventory atomically with duplicate protection`.
 
 ## 7. Order outcomes and dead-letter recovery
@@ -279,21 +280,21 @@ both services `messaging/KafkaErrorHandlingConfiguration.java`;
 **Interfaces:** `OrderOutcomeService.confirm(StockReserved)` and
 `reject(StockRejected)` update the order and processed event atomically.
 
-- [ ] Test successful/rejected state updates, duplicate result, conflicting terminal
+- [x] Test successful/rejected state updates, duplicate result, conflicting terminal
   result, unknown order, and redelivery after DB commit before offset commit:
   ```java
   assertThat(order.status()).isEqualTo(CONFIRMED);
   assertThat(processedEventCount).isEqualTo(1);
   ```
-- [ ] Lock the order row; allow PENDING to transition, treat same terminal outcome
+- [x] Lock the order row; allow PENDING to transition, treat same terminal outcome
   as a no-op, and reject contradictory outcomes. Validate causation against the
   stored order-created event. Unknown orders are processing errors.
-- [ ] Configure bounded blocking retries (three retries at one-second intervals),
+- [x] Configure bounded blocking retries (three retries at one-second intervals),
   then dead-letter to `<source>.DLT`. Decode strings inside the listener so malformed
   payloads enter recovery. Require confirmed DLT send before advancing the offset.
-- [ ] Test malformed JSON, unsupported version, transient recovery, exhausted retry,
+- [x] Test malformed JSON, unsupported version, transient recovery, exhausted retry,
   and DLT producer failure. Assert technical failures never mark an order REJECTED.
-- [ ] Run focused tests and `./mvnw verify`; commit/push:
+- [x] Run focused tests and `./mvnw verify`; commit/push:
   `feat: apply order outcomes and recover failed Kafka messages`.
 
 ## 8. Actuator, metrics, and structured logs
@@ -304,22 +305,22 @@ both services `observability/ObservabilityIT.java`; listener correlation handlin
 
 **Produces:** health/probe and Prometheus endpoints on management ports, JSON logs.
 
-- [ ] Write HTTP metric/probe tests and assertions that a duplicate does not
+- [x] Write HTTP metric/probe tests and assertions that a duplicate does not
   increment business counters. Test correlation cleanup even after an exception.
   ```java
   assertThat(afterDuplicates - beforeDuplicates).isEqualTo(1.0);
   assertThat(metricTagKeys).doesNotContain("orderId", "eventId", "productId");
   ```
-- [ ] Add Actuator/Prometheus registry; expose only health and prometheus. Enable
+- [x] Add Actuator/Prometheus registry; expose only health and prometheus. Enable
   probes and separate management ports. Require `metrics.read` and the correct
   audience for metrics; permit minimal health responses without authentication. Keep liveness independent of DB/Kafka;
   readiness includes DB and a bounded Kafka connectivity check.
-- [ ] Add orders-created and reservation-outcome counters after transaction commit,
+- [x] Add orders-created and reservation-outcome counters after transaction commit,
   reservation timer, publisher failures, duplicates, and DLT outcomes. Refresh
   outbox count/oldest-age gauges periodically into atomic cached values.
-- [ ] Enable framework HTTP/JVM/pool/Kafka metrics. Emit JSON logs and add order/event
+- [x] Enable framework HTTP/JVM/pool/Kafka metrics. Emit JSON logs and add order/event
   IDs with try/finally context cleanup; use no IDs in tags or raw payload logging.
-- [ ] Run rollback/duplicate/endpoint tests and `./mvnw verify`; commit/push:
+- [x] Run rollback/duplicate/endpoint tests and `./mvnw verify`; commit/push:
   `feat: expose operational metrics and structured correlation logs`.
 
 ## 9. Complete Docker Compose runtime

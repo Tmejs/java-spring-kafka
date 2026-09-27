@@ -1,0 +1,97 @@
+spring:
+  application:
+    name: inventory-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/inventory}
+    username: ${DB_USERNAME:inventory}
+    password: ${DB_PASSWORD:inventory}
+  flyway:
+    locations: classpath:db/migration
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+    listener:
+      ack-mode: record
+      observation-enabled: true
+    template:
+      observation-enabled: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${SECURITY_ISSUER_URI:http://localhost:8180/realms/reservation}
+          jwk-set-uri: ${SECURITY_JWK_SET_URI:http://localhost:8180/realms/reservation/protocol/openid-connect/certs}
+          audiences: inventory-api
+
+server:
+  port: 8081
+
+management:
+  server:
+    port: ${MANAGEMENT_PORT:9081}
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db,kafka
+
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: ${spring.application.name}
+
+reservation:
+  kafka:
+    orders-topic: orders.v1
+    consumer-group: inventory-reservations
+    dlt-ack-timeout: 10s
+  outbox:
+    batch-size: 100
+    fixed-delay: 1s
+    initial-delay: 1s
+    ack-timeout: 10s
+    backoff-initial: 1s
+    backoff-max: 5m
+  health:
+    kafka-timeout: 2s
+  metrics:
+    outbox-refresh: 10s
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    url: /openapi/inventory.yaml
+    disable-swagger-default-url: true
+    oauth:
+      client-id: reservation-swagger
+      scopes: inventory-api
+      use-pkce-with-authorization-code-grant: true

@@ -1,0 +1,1814 @@
+diff --git a/codex/execution/task-3-report.md b/codex/execution/task-3-report.md
+new file mode 100644
+index 0000000..0fc3c15
+--- /dev/null
++++ b/codex/execution/task-3-report.md
+@@ -0,0 +1,62 @@
++# Task 3 report — persistence and Inventory HTTP API
++
++## Delivered
++
++- Added complete V1 Flyway schemas for Orders (`orders`, `order_items`,
++  `idempotency_keys`, `outbox`, `processed_events`) and Inventory (`products`,
++  `reservations`, `outbox`, `processed_events`). Constraints cover positive order
++  quantities, nonnegative stock, owner/key and event uniqueness, reservation order
++  uniqueness, terminal-state consistency, and pending-outbox indexes. Outbox JSON
++  payloads use PostgreSQL `text`.
++- Both services use Flyway 12.4.0, PostgreSQL JDBC, and Hibernate
++  `ddl-auto: validate`; Spring Boot 4.1.1 also requires the separate
++  `spring-boot-flyway` auto-configuration module.
++- Implemented Inventory's generated `ProductsApi` with explicit domain/model
++  mapping, server-generated UUIDs, duplicate names, stable ascending UUID
++  pagination, `Location`, pessimistically locked stock additions, overflow
++  rejection, and RFC 9457 problem responses for validation, missing products,
++  and conflicts.
++- Reused PostgreSQL Testcontainers support for every full application test and
++  removed product fixture routes now covered by the real controller.
++- Changed the local Keycloak development realm from `sslRequired: external` to
++  `none`. The real realm test demonstrated that Docker Desktop bridge traffic was
++  rejected with `403 HTTPS required`; the project intentionally uses local HTTP
++  development mode.
++
++## TDD and verification evidence
++
++- RED:
++  `./mvnw -B -pl order-service,inventory-service -am verify -Dtest=NoUnitTests -Dit.test=MigrationIT,ProductApiIT -Dfailsafe.failIfNoSpecifiedTests=false -Dsurefire.failIfNoSpecifiedTests=false`
++  started PostgreSQL 18.1 and failed on the empty schema (`orders` relation and
++  required tables absent).
++- GREEN, Orders migration:
++  `./mvnw -B -pl order-service -am verify -Dtest=NoUnitTests -Dit.test=MigrationIT -Dfailsafe.failIfNoSpecifiedTests=false -Dsurefire.failIfNoSpecifiedTests=false`
++  passed 2 tests. Flyway applied exactly one migration before Hibernate mapping
++  validation; SQL assertions verified all tables, text payloads, the partial
++  pending index, and key constraints.
++- GREEN, Inventory API:
++  `./mvnw -B -pl inventory-service -am verify -Dtest=NoUnitTests -Dit.test=ProductApiIT -Dfailsafe.failIfNoSpecifiedTests=false -Dsurefire.failIfNoSpecifiedTests=false`
++  passed 5 generated-client tests with real signed JWTs and PostgreSQL. The suite
++  verifies schema/mappings, duplicate-name creation, UUID-ordered pagination,
++  customer/admin/anonymous authorization, validation bounds, 404/409 problems,
++  and two simultaneous additions with the exact final quantity
++  `before + firstAdd + secondAdd`.
++- GREEN, local realm regression:
++  `./mvnw -B -pl order-service -am verify -Dtest=NoUnitTests -Dit.test=KeycloakRealmIT -Dsurefire.failIfNoSpecifiedTests=false -Dfailsafe.failIfNoSpecifiedTests=false`
++  passed the real Keycloak token and cross-audience checks.
++- GREEN, full reactor: `./mvnw -B verify` passed on Temurin 25.0.4 in 43.005 s:
++  40 tests, zero failures, zero errors, zero skips. This preserves all 33 baseline
++  tests and adds seven PostgreSQL-backed tests.
++- `git diff --check` passed.
++
++## Pinned database image
++
++- Tests use the official `postgres:18.1` image.
++- Locally pulled digest:
++  `postgres@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f`.
++- Runtime verification reported PostgreSQL 18.1 and Testcontainers 2.0.5.
++
++## Remaining scope
++
++Orders HTTP behavior, reservation processing, Kafka, and outbox publishing remain
++assigned to later checkpoints.
+diff --git a/codex/progress.md b/codex/progress.md
+index c468e5d..d178249 100644
+--- a/codex/progress.md
++++ b/codex/progress.md
+@@ -101,10 +101,26 @@ their actual outcomes, and any remaining limitations before committing and pushi
+   roles, protect metrics with `metrics.read`, keep Swagger/spec and health public,
+   and deny unmatched routes.
+ - Added `CurrentOwner.subject()` for later Orders ownership enforcement; database
+   ownership behavior remains checkpoint 4 work.
+ - Added a Keycloak 26.7.4 realm with PKCE-only browser login for Alice, Bob, and
+   admin plus least-privilege Orders, Inventory, and monitoring service accounts.
+ - TDD covered 12 authorization tests, 14 encoded-token validation tests, the six
+   existing OpenAPI HTTP tests, and a real Keycloak realm import/token-claims test.
+ - SDKMAN Temurin Java 25.0.4 `./mvnw -B verify` passed all six reactor modules:
+   33 tests, zero failures, zero errors, and zero skips.
++
++## Persistence and Inventory API checkpoint — 2026-09-25
++
++- Added complete Orders and Inventory V1 Flyway schemas and JPA mappings. Both
++  services run Flyway before Hibernate `ddl-auto: validate` against PostgreSQL.
++- Implemented the generated Inventory `ProductsApi`: server UUIDs, duplicate
++  names, stable UUID pagination, product reads, and pessimistically locked stock
++  additions with validation, 404, and overflow problem responses.
++- PostgreSQL 18.1 Testcontainers tests verify both schemas plus real generated
++  client HTTP calls, signed JWT authorization, and concurrent additions without
++  lost updates. The official image digest used locally is
++  `sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f`.
++- Corrected the local Keycloak realm's SSL requirement so its documented HTTP
++  development mode works through Docker Desktop's bridge network.
++- Temurin Java 25.0.4 `./mvnw -B verify` passed all six reactor modules: 40 tests,
++  zero failures, zero errors, and zero skips.
+diff --git a/infra/keycloak/reservation-realm.json b/infra/keycloak/reservation-realm.json
+index a585ee2..a899d71 100644
+--- a/infra/keycloak/reservation-realm.json
++++ b/infra/keycloak/reservation-realm.json
+@@ -1,15 +1,15 @@
+ {
+   "realm": "reservation",
+   "displayName": "Reservation Demo",
+   "enabled": true,
+-  "sslRequired": "external",
++  "sslRequired": "none",
+   "registrationAllowed": false,
+   "resetPasswordAllowed": false,
+   "rememberMe": true,
+   "roles": {
+     "realm": [
+       {
+         "name": "CUSTOMER"
+       },
+       {
+         "name": "INVENTORY_ADMIN"
+diff --git a/inventory-service/pom.xml b/inventory-service/pom.xml
+index 7a6d37a..2e0a89d 100644
+--- a/inventory-service/pom.xml
++++ b/inventory-service/pom.xml
+@@ -19,20 +19,41 @@
+             <version>${project.version}</version>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-webmvc</artifactId>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-validation</artifactId>
+         </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-data-jpa</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.flywaydb</groupId>
++            <artifactId>flyway-core</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-flyway</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.flywaydb</groupId>
++            <artifactId>flyway-database-postgresql</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.postgresql</groupId>
++            <artifactId>postgresql</artifactId>
++            <scope>runtime</scope>
++        </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+         </dependency>
+         <dependency>
+             <groupId>org.springdoc</groupId>
+             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+             <version>${springdoc.version}</version>
+         </dependency>
+         <dependency>
+@@ -52,20 +73,31 @@
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-webmvc-test</artifactId>
+             <scope>test</scope>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-security-oauth2-resource-server-test</artifactId>
+             <scope>test</scope>
+         </dependency>
++        <dependency>
++            <groupId>${project.groupId}</groupId>
++            <artifactId>api-clients</artifactId>
++            <version>${project.version}</version>
++            <scope>test</scope>
++        </dependency>
++        <dependency>
++            <groupId>org.testcontainers</groupId>
++            <artifactId>testcontainers-postgresql</artifactId>
++            <scope>test</scope>
++        </dependency>
+     </dependencies>
+ 
+     <build>
+         <plugins>
+             <plugin>
+                 <groupId>org.apache.maven.plugins</groupId>
+                 <artifactId>maven-dependency-plugin</artifactId>
+                 <version>${maven-dependency-plugin.version}</version>
+                 <executions>
+                     <execution>
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/messaging/OutboxEntity.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/messaging/OutboxEntity.java
+new file mode 100644
+index 0000000..64a83d0
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/messaging/OutboxEntity.java
+@@ -0,0 +1,48 @@
++package io.github.tmejs.reservation.inventory.messaging;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++import java.time.Instant;
++import java.util.UUID;
++
++@Entity
++@Table(name = "outbox")
++public class OutboxEntity {
++
++    @Id
++    private UUID id;
++
++    @Column(name = "event_id", nullable = false, unique = true)
++    private UUID eventId;
++
++    @Column(name = "order_id", nullable = false)
++    private UUID orderId;
++
++    @Column(name = "event_type", nullable = false, length = 128)
++    private String eventType;
++
++    @Column(nullable = false, length = 255)
++    private String topic;
++
++    @Column(nullable = false, columnDefinition = "text")
++    private String payload;
++
++    @Column(name = "created_at", nullable = false)
++    private Instant createdAt;
++
++    @Column(name = "next_attempt_at", nullable = false)
++    private Instant nextAttemptAt;
++
++    @Column(name = "attempt_count", nullable = false)
++    private int attemptCount;
++
++    @Column(name = "published_at")
++    private Instant publishedAt;
++
++    @Column(name = "last_error", columnDefinition = "text")
++    private String lastError;
++
++    protected OutboxEntity() {}
++}
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/messaging/ProcessedEventEntity.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/messaging/ProcessedEventEntity.java
+new file mode 100644
+index 0000000..30001f4
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/messaging/ProcessedEventEntity.java
+@@ -0,0 +1,22 @@
++package io.github.tmejs.reservation.inventory.messaging;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++import java.time.Instant;
++import java.util.UUID;
++
++@Entity
++@Table(name = "processed_events")
++public class ProcessedEventEntity {
++
++    @Id
++    @Column(name = "event_id")
++    private UUID eventId;
++
++    @Column(name = "processed_at", nullable = false)
++    private Instant processedAt;
++
++    protected ProcessedEventEntity() {}
++}
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductEntity.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductEntity.java
+new file mode 100644
+index 0000000..9a5de62
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductEntity.java
+@@ -0,0 +1,45 @@
++package io.github.tmejs.reservation.inventory.product;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++import java.util.UUID;
++
++@Entity
++@Table(name = "products")
++public class ProductEntity {
++
++    @Id
++    private UUID id;
++
++    @Column(nullable = false, length = 200)
++    private String name;
++
++    @Column(name = "available_quantity", nullable = false)
++    private int availableQuantity;
++
++    protected ProductEntity() {}
++
++    ProductEntity(UUID id, String name, int availableQuantity) {
++        this.id = id;
++        this.name = name;
++        this.availableQuantity = availableQuantity;
++    }
++
++    public UUID getId() {
++        return id;
++    }
++
++    public String getName() {
++        return name;
++    }
++
++    public int getAvailableQuantity() {
++        return availableQuantity;
++    }
++
++    void setAvailableQuantity(int availableQuantity) {
++        this.availableQuantity = availableQuantity;
++    }
++}
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductNotFoundException.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductNotFoundException.java
+new file mode 100644
+index 0000000..126cc04
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductNotFoundException.java
+@@ -0,0 +1,10 @@
++package io.github.tmejs.reservation.inventory.product;
++
++import java.util.UUID;
++
++final class ProductNotFoundException extends RuntimeException {
++
++    ProductNotFoundException(UUID productId) {
++        super("Product " + productId + " does not exist");
++    }
++}
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductProblemHandler.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductProblemHandler.java
+new file mode 100644
+index 0000000..10e35f3
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductProblemHandler.java
+@@ -0,0 +1,84 @@
++package io.github.tmejs.reservation.inventory.product;
++
++import jakarta.servlet.http.HttpServletRequest;
++import jakarta.validation.ConstraintViolation;
++import jakarta.validation.ConstraintViolationException;
++import java.net.URI;
++import java.util.List;
++import java.util.Map;
++import org.springframework.http.HttpStatus;
++import org.springframework.http.ProblemDetail;
++import org.springframework.http.ResponseEntity;
++import org.springframework.http.converter.HttpMessageNotReadableException;
++import org.springframework.web.bind.MethodArgumentNotValidException;
++import org.springframework.web.bind.annotation.ExceptionHandler;
++import org.springframework.web.bind.annotation.RestControllerAdvice;
++import org.springframework.web.method.annotation.HandlerMethodValidationException;
++
++@RestControllerAdvice
++final class ProductProblemHandler {
++
++    @ExceptionHandler(ProductNotFoundException.class)
++    ResponseEntity<ProblemDetail> notFound(ProductNotFoundException exception, HttpServletRequest request) {
++        return problem(HttpStatus.NOT_FOUND, "Product not found", exception.getMessage(), request, List.of());
++    }
++
++    @ExceptionHandler(StockOverflowException.class)
++    ResponseEntity<ProblemDetail> conflict(StockOverflowException exception, HttpServletRequest request) {
++        return problem(HttpStatus.CONFLICT, "Stock quantity conflict", exception.getMessage(), request, List.of());
++    }
++
++    @ExceptionHandler(MethodArgumentNotValidException.class)
++    ResponseEntity<ProblemDetail> invalidBody(MethodArgumentNotValidException exception, HttpServletRequest request) {
++        List<Map<String, String>> errors = exception.getBindingResult().getFieldErrors().stream()
++                .map(error -> Map.of("field", error.getField(), "message", error.getDefaultMessage()))
++                .toList();
++        return problem(HttpStatus.BAD_REQUEST, "Invalid request", "Request validation failed", request, errors);
++    }
++
++    @ExceptionHandler(HandlerMethodValidationException.class)
++    ResponseEntity<ProblemDetail> invalidParameters(
++            HandlerMethodValidationException exception, HttpServletRequest request) {
++        List<Map<String, String>> errors = exception.getParameterValidationResults().stream()
++                .flatMap(result -> result.getResolvableErrors().stream()
++                        .map(error -> Map.of(
++                                "field", result.getMethodParameter().getParameterName(),
++                                "message", error.getDefaultMessage())))
++                .toList();
++        return problem(HttpStatus.BAD_REQUEST, "Invalid request", "Request validation failed", request, errors);
++    }
++
++    @ExceptionHandler(ConstraintViolationException.class)
++    ResponseEntity<ProblemDetail> constraintViolation(
++            ConstraintViolationException exception, HttpServletRequest request) {
++        List<Map<String, String>> errors = exception.getConstraintViolations().stream()
++                .map(ProductProblemHandler::toFieldError)
++                .toList();
++        return problem(HttpStatus.BAD_REQUEST, "Invalid request", "Request validation failed", request, errors);
++    }
++
++    @ExceptionHandler(HttpMessageNotReadableException.class)
++    ResponseEntity<ProblemDetail> unreadableBody(HttpMessageNotReadableException exception, HttpServletRequest request) {
++        return problem(HttpStatus.BAD_REQUEST, "Invalid request", "Request body could not be read", request, List.of());
++    }
++
++    private static Map<String, String> toFieldError(ConstraintViolation<?> violation) {
++        return Map.of("field", violation.getPropertyPath().toString(), "message", violation.getMessage());
++    }
++
++    private static ResponseEntity<ProblemDetail> problem(
++            HttpStatus status,
++            String title,
++            String detail,
++            HttpServletRequest request,
++            List<Map<String, String>> errors) {
++        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
++        problem.setTitle(title);
++        problem.setType(URI.create("about:blank"));
++        problem.setInstance(URI.create(request.getRequestURI()));
++        if (!errors.isEmpty()) {
++            problem.setProperty("errors", errors);
++        }
++        return ResponseEntity.status(status).body(problem);
++    }
++}
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductRepository.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductRepository.java
+new file mode 100644
+index 0000000..ea88c34
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductRepository.java
+@@ -0,0 +1,16 @@
++package io.github.tmejs.reservation.inventory.product;
++
++import jakarta.persistence.LockModeType;
++import java.util.Optional;
++import java.util.UUID;
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Lock;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++
++public interface ProductRepository extends JpaRepository<ProductEntity, UUID> {
++
++    @Lock(LockModeType.PESSIMISTIC_WRITE)
++    @Query("select product from ProductEntity product where product.id = :id")
++    Optional<ProductEntity> findByIdForUpdate(@Param("id") UUID id);
++}
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductService.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductService.java
+new file mode 100644
+index 0000000..4602ab7
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductService.java
+@@ -0,0 +1,45 @@
++package io.github.tmejs.reservation.inventory.product;
++
++import java.util.UUID;
++import org.springframework.data.domain.Page;
++import org.springframework.data.domain.PageRequest;
++import org.springframework.data.domain.Sort;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++@Service
++public class ProductService {
++
++    private final ProductRepository products;
++
++    ProductService(ProductRepository products) {
++        this.products = products;
++    }
++
++    @Transactional
++    public ProductEntity create(String name, int initialQuantity) {
++        return products.save(new ProductEntity(UUID.randomUUID(), name, initialQuantity));
++    }
++
++    @Transactional(readOnly = true)
++    public ProductEntity get(UUID id) {
++        return products.findById(id).orElseThrow(() -> new ProductNotFoundException(id));
++    }
++
++    @Transactional(readOnly = true)
++    public Page<ProductEntity> list(int page, int size) {
++        return products.findAll(PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "id")));
++    }
++
++    @Transactional
++    public ProductEntity addStock(UUID id, int quantity) {
++        ProductEntity product = products.findByIdForUpdate(id)
++                .orElseThrow(() -> new ProductNotFoundException(id));
++        long updatedQuantity = (long) product.getAvailableQuantity() + quantity;
++        if (updatedQuantity > Integer.MAX_VALUE) {
++            throw new StockOverflowException();
++        }
++        product.setAvailableQuantity((int) updatedQuantity);
++        return product;
++    }
++}
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductsController.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductsController.java
+new file mode 100644
+index 0000000..0bd4f3b
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/ProductsController.java
+@@ -0,0 +1,53 @@
++package io.github.tmejs.reservation.inventory.product;
++
++import io.github.tmejs.reservation.api.inventory.ProductsApi;
++import io.github.tmejs.reservation.api.inventory.model.AddStockRequest;
++import io.github.tmejs.reservation.api.inventory.model.CreateProductRequest;
++import io.github.tmejs.reservation.api.inventory.model.Product;
++import io.github.tmejs.reservation.api.inventory.model.ProductPage;
++import java.net.URI;
++import java.util.UUID;
++import org.springframework.http.ResponseEntity;
++import org.springframework.web.bind.annotation.RestController;
++
++@RestController
++public class ProductsController implements ProductsApi {
++
++    private final ProductService productService;
++
++    ProductsController(ProductService productService) {
++        this.productService = productService;
++    }
++
++    @Override
++    public ResponseEntity<Product> createProduct(CreateProductRequest request) {
++        Product created = toApi(productService.create(request.getName(), request.getInitialQuantity()));
++        return ResponseEntity.created(URI.create("/products/" + created.getId())).body(created);
++    }
++
++    @Override
++    public ResponseEntity<Product> getProduct(UUID id) {
++        return ResponseEntity.ok(toApi(productService.get(id)));
++    }
++
++    @Override
++    public ResponseEntity<ProductPage> listProducts(Integer page, Integer size) {
++        var products = productService.list(page, size);
++        var response = new ProductPage(
++                products.getContent().stream().map(ProductsController::toApi).toList(),
++                products.getNumber(),
++                products.getSize(),
++                products.getTotalElements(),
++                products.getTotalPages());
++        return ResponseEntity.ok(response);
++    }
++
++    @Override
++    public ResponseEntity<Product> addStock(UUID id, AddStockRequest request) {
++        return ResponseEntity.ok(toApi(productService.addStock(id, request.getQuantity())));
++    }
++
++    private static Product toApi(ProductEntity entity) {
++        return new Product(entity.getId(), entity.getName(), entity.getAvailableQuantity());
++    }
++}
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/StockOverflowException.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/StockOverflowException.java
+new file mode 100644
+index 0000000..675290c
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/product/StockOverflowException.java
+@@ -0,0 +1,8 @@
++package io.github.tmejs.reservation.inventory.product;
++
++final class StockOverflowException extends RuntimeException {
++
++    StockOverflowException() {
++        super("Adding stock would exceed the maximum supported quantity");
++    }
++}
+diff --git a/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/reservation/ReservationEntity.java b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/reservation/ReservationEntity.java
+new file mode 100644
+index 0000000..71f3b45
+--- /dev/null
++++ b/inventory-service/src/main/java/io/github/tmejs/reservation/inventory/reservation/ReservationEntity.java
+@@ -0,0 +1,34 @@
++package io.github.tmejs.reservation.inventory.reservation;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++import java.time.Instant;
++import java.util.UUID;
++
++@Entity
++@Table(name = "reservations")
++public class ReservationEntity {
++
++    @Id
++    @Column(name = "order_id")
++    private UUID orderId;
++
++    @Column(name = "triggering_event_id", nullable = false)
++    private UUID triggeringEventId;
++
++    @Column(name = "items_fingerprint", nullable = false, length = 64)
++    private String itemsFingerprint;
++
++    @Column(nullable = false, length = 32)
++    private String outcome;
++
++    @Column(name = "rejection_reason", length = 64)
++    private String rejectionReason;
++
++    @Column(name = "created_at", nullable = false)
++    private Instant createdAt;
++
++    protected ReservationEntity() {}
++}
+diff --git a/inventory-service/src/main/resources/application.yaml b/inventory-service/src/main/resources/application.yaml
+index 2ff9b96..b217ac4 100644
+--- a/inventory-service/src/main/resources/application.yaml
++++ b/inventory-service/src/main/resources/application.yaml
+@@ -1,13 +1,23 @@
+ spring:
+   application:
+     name: inventory-service
++  datasource:
++    url: ${DB_URL:jdbc:postgresql://localhost:5432/inventory}
++    username: ${DB_USERNAME:inventory}
++    password: ${DB_PASSWORD:inventory}
++  flyway:
++    locations: classpath:db/migration
++  jpa:
++    hibernate:
++      ddl-auto: validate
++    open-in-view: false
+   security:
+     oauth2:
+       resourceserver:
+         jwt:
+           issuer-uri: ${SECURITY_ISSUER_URI:http://localhost:8180/realms/reservation}
+           jwk-set-uri: ${SECURITY_JWK_SET_URI:http://localhost:8180/realms/reservation/protocol/openid-connect/certs}
+           audiences: inventory-api
+ 
+ server:
+   port: 8081
+diff --git a/inventory-service/src/main/resources/db/migration/V1__initial_schema.sql b/inventory-service/src/main/resources/db/migration/V1__initial_schema.sql
+new file mode 100644
+index 0000000..794691f
+--- /dev/null
++++ b/inventory-service/src/main/resources/db/migration/V1__initial_schema.sql
+@@ -0,0 +1,45 @@
++CREATE TABLE products (
++    id UUID PRIMARY KEY,
++    name VARCHAR(200) NOT NULL,
++    available_quantity INTEGER NOT NULL,
++    CONSTRAINT chk_products_available_quantity CHECK (available_quantity >= 0)
++);
++
++CREATE TABLE reservations (
++    order_id UUID PRIMARY KEY,
++    triggering_event_id UUID NOT NULL,
++    items_fingerprint VARCHAR(64) NOT NULL,
++    outcome VARCHAR(32) NOT NULL,
++    rejection_reason VARCHAR(64),
++    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
++    CONSTRAINT uq_reservations_order_id UNIQUE (order_id),
++    CONSTRAINT chk_reservations_outcome CHECK (outcome IN ('RESERVED', 'REJECTED')),
++    CONSTRAINT chk_reservations_rejection_reason CHECK (
++        (outcome = 'REJECTED' AND rejection_reason IS NOT NULL)
++        OR (outcome = 'RESERVED' AND rejection_reason IS NULL)
++    )
++);
++
++CREATE TABLE outbox (
++    id UUID PRIMARY KEY,
++    event_id UUID NOT NULL,
++    order_id UUID NOT NULL,
++    event_type VARCHAR(128) NOT NULL,
++    topic VARCHAR(255) NOT NULL,
++    payload TEXT NOT NULL,
++    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
++    next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL,
++    attempt_count INTEGER NOT NULL DEFAULT 0,
++    published_at TIMESTAMP WITH TIME ZONE,
++    last_error TEXT,
++    CONSTRAINT uq_outbox_event_id UNIQUE (event_id),
++    CONSTRAINT chk_outbox_attempt_count CHECK (attempt_count >= 0)
++);
++
++CREATE INDEX idx_outbox_pending ON outbox (next_attempt_at, created_at)
++    WHERE published_at IS NULL;
++
++CREATE TABLE processed_events (
++    event_id UUID PRIMARY KEY,
++    processed_at TIMESTAMP WITH TIME ZONE NOT NULL
++);
+diff --git a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/config/OpenApiExposureIT.java b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/config/OpenApiExposureIT.java
+index 8fc22d2..6128605 100644
+--- a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/config/OpenApiExposureIT.java
++++ b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/config/OpenApiExposureIT.java
+@@ -6,23 +6,24 @@ import java.io.IOException;
+ import java.net.URI;
+ import java.net.http.HttpClient;
+ import java.net.http.HttpRequest;
+ import java.net.http.HttpResponse;
+ import java.nio.charset.StandardCharsets;
+ import org.junit.jupiter.api.Test;
+ import org.springframework.boot.test.context.SpringBootTest;
+ import org.springframework.boot.test.web.server.LocalServerPort;
+ import org.springframework.core.io.ClassPathResource;
+ import io.github.tmejs.reservation.inventory.InventoryApplication;
++import io.github.tmejs.reservation.inventory.support.InventoryPostgresIntegrationTest;
+ 
+ @SpringBootTest(classes = InventoryApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+-class OpenApiExposureIT {
++class OpenApiExposureIT extends InventoryPostgresIntegrationTest {
+ 
+     private final HttpClient client = HttpClient.newHttpClient();
+ 
+     @LocalServerPort
+     private int port;
+ 
+     @Test
+     void servesOriginalInventoryContract() throws Exception {
+         var expected = new ClassPathResource("openapi/inventory.yaml")
+                 .getContentAsString(StandardCharsets.UTF_8);
+diff --git a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/product/ProductApiIT.java b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/product/ProductApiIT.java
+new file mode 100644
+index 0000000..a3ec180
+--- /dev/null
++++ b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/product/ProductApiIT.java
+@@ -0,0 +1,275 @@
++package io.github.tmejs.reservation.inventory.product;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++
++import com.nimbusds.jose.jwk.JWKSet;
++import com.nimbusds.jose.jwk.RSAKey;
++import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
++import com.nimbusds.jose.proc.SecurityContext;
++import com.sun.net.httpserver.HttpServer;
++import io.github.tmejs.reservation.client.inventory.ApiClient;
++import io.github.tmejs.reservation.client.inventory.ApiException;
++import io.github.tmejs.reservation.client.inventory.api.ProductsApi;
++import io.github.tmejs.reservation.client.inventory.model.AddStockRequest;
++import io.github.tmejs.reservation.client.inventory.model.CreateProductRequest;
++import io.github.tmejs.reservation.client.inventory.model.Product;
++import io.github.tmejs.reservation.inventory.InventoryApplication;
++import io.github.tmejs.reservation.inventory.support.InventoryPostgresIntegrationTest;
++import jakarta.persistence.EntityManagerFactory;
++import java.io.IOException;
++import java.net.InetAddress;
++import java.net.InetSocketAddress;
++import java.nio.charset.StandardCharsets;
++import java.security.KeyPair;
++import java.security.KeyPairGenerator;
++import java.security.interfaces.RSAPrivateKey;
++import java.security.interfaces.RSAPublicKey;
++import java.time.Instant;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++import java.util.UUID;
++import java.util.concurrent.CountDownLatch;
++import java.util.concurrent.Executors;
++import java.util.concurrent.TimeUnit;
++import org.junit.jupiter.api.AfterAll;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.context.SpringBootTest;
++import org.springframework.boot.test.web.server.LocalServerPort;
++import org.springframework.jdbc.core.JdbcTemplate;
++import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
++import org.springframework.security.oauth2.jwt.JwtClaimsSet;
++import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
++import org.springframework.security.oauth2.jwt.JwsHeader;
++import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
++import org.springframework.test.context.DynamicPropertyRegistry;
++import org.springframework.test.context.DynamicPropertySource;
++import tools.jackson.databind.ObjectMapper;
++
++@SpringBootTest(classes = InventoryApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
++class ProductApiIT extends InventoryPostgresIntegrationTest {
++
++    private static final String ISSUER = "https://issuer.example/realms/reservation";
++    private static final String KEY_ID = "product-api-test-key";
++    private static final KeyPair SIGNING_KEY = generateKeyPair();
++    private static final HttpServer JWKS_SERVER = startJwksServer();
++    private static final ObjectMapper JSON = new ObjectMapper();
++
++    @LocalServerPort
++    private int port;
++
++    @Autowired
++    private JdbcTemplate jdbc;
++
++    @Autowired
++    private EntityManagerFactory entityManagerFactory;
++
++    @DynamicPropertySource
++    static void jwtProperties(DynamicPropertyRegistry registry) {
++        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> ISSUER);
++        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", () ->
++                "http://" + JWKS_SERVER.getAddress().getHostString() + ":"
++                        + JWKS_SERVER.getAddress().getPort() + "/jwks");
++    }
++
++    @BeforeEach
++    void clearProducts() {
++        jdbc.execute("truncate table products cascade");
++    }
++
++    @AfterAll
++    static void stopJwksServer() {
++        JWKS_SERVER.stop(0);
++    }
++
++    @Test
++    void migratesInventorySchemaAndValidatesMappings() {
++        assertThat(jdbc.queryForList(
++                        "select table_name from information_schema.tables where table_schema = 'public'",
++                        String.class))
++                .containsExactlyInAnyOrder(
++                        "flyway_schema_history", "products", "reservations", "outbox", "processed_events");
++        assertThat(entityManagerFactory.getMetamodel().getEntities())
++                .extracting(entity -> entity.getName())
++                .contains("ProductEntity", "ReservationEntity", "OutboxEntity", "ProcessedEventEntity");
++        assertThat(jdbc.queryForObject(
++                        "select indexdef from pg_indexes where schemaname = 'public' "
++                                + "and tablename = 'outbox' and indexname = 'idx_outbox_pending'",
++                        String.class))
++                .contains("WHERE (published_at IS NULL)");
++    }
++
++    @Test
++    void createsDuplicateNamesAndListsStableUuidOrderedPages() throws Exception {
++        ProductsApi admin = api("INVENTORY_ADMIN");
++        var created = new ArrayList<Product>();
++        created.add(admin.createProduct(createRequest("same-name", 3)));
++        created.add(admin.createProduct(createRequest("same-name", 5)));
++        created.add(admin.createProduct(createRequest("different", 7)));
++
++        assertThat(created).extracting(Product::getId).doesNotHaveDuplicates();
++        var expectedIds = created.stream().map(Product::getId).sorted().toList();
++        var firstPage = api("CUSTOMER").listProducts(0, 2);
++        var secondPage = api("CUSTOMER").listProducts(1, 2);
++        var actualIds = new ArrayList<UUID>();
++        firstPage.getContent().forEach(product -> actualIds.add(product.getId()));
++        secondPage.getContent().forEach(product -> actualIds.add(product.getId()));
++
++        assertThat(actualIds).containsExactlyElementsOf(expectedIds);
++        assertThat(firstPage.getPage()).isZero();
++        assertThat(firstPage.getSize()).isEqualTo(2);
++        assertThat(firstPage.getTotalElements()).isEqualTo(3);
++        assertThat(firstPage.getTotalPages()).isEqualTo(2);
++        assertThat(api("CUSTOMER").getProduct(created.getFirst().getId())).isEqualTo(created.getFirst());
++        assertThat(admin.createProductWithHttpInfo(createRequest("location", 0))
++                        .getHeaders().get("location"))
++                .singleElement()
++                .asString()
++                .startsWith("/products/");
++    }
++
++    @Test
++    void enforcesAuthenticationRolesAndPaginationBounds() throws Exception {
++        Product created = api("INVENTORY_ADMIN").createProduct(createRequest("secured", 1));
++
++        assertThat(api("CUSTOMER").getProduct(created.getId()).getName()).isEqualTo("secured");
++        assertApiProblem(() -> api("CUSTOMER").createProduct(createRequest("denied", 0)), 403);
++        assertApiProblem(() -> api("CUSTOMER").addStock(created.getId(), stockRequest(1)), 403);
++        assertApiProblem(() -> anonymousApi().getProduct(created.getId()), 401);
++        assertApiProblem(() -> api("CUSTOMER").listProducts(-1, 20), 400);
++        assertApiProblem(() -> api("CUSTOMER").listProducts(0, 101), 400);
++    }
++
++    @Test
++    void returnsProblemDetailsForInvalidMissingAndOverflowRequests() throws Exception {
++        ProductsApi admin = api("INVENTORY_ADMIN");
++        assertApiProblem(() -> admin.createProduct(createRequest(" ", -1)), 400);
++
++        Product maximum = admin.createProduct(createRequest("maximum", Integer.MAX_VALUE));
++        assertApiProblem(() -> admin.addStock(maximum.getId(), stockRequest(0)), 400);
++        assertApiProblem(() -> admin.addStock(maximum.getId(), stockRequest(1)), 409);
++        assertApiProblem(() -> api("CUSTOMER").getProduct(UUID.randomUUID()), 404);
++    }
++
++    @Test
++    void concurrentStockAdditionsDoNotLoseUpdates() throws Exception {
++        int before = 10;
++        int firstAdd = 7;
++        int secondAdd = 11;
++        Product created = api("INVENTORY_ADMIN").createProduct(createRequest("concurrent", before));
++        var ready = new CountDownLatch(2);
++        var start = new CountDownLatch(1);
++
++        try (var executor = Executors.newFixedThreadPool(2)) {
++            var first = executor.submit(() -> addAfterBarrier(created.getId(), firstAdd, ready, start));
++            var second = executor.submit(() -> addAfterBarrier(created.getId(), secondAdd, ready, start));
++            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
++            start.countDown();
++            first.get(10, TimeUnit.SECONDS);
++            second.get(10, TimeUnit.SECONDS);
++        }
++
++        Product after = api("CUSTOMER").getProduct(created.getId());
++        assertThat(after.getAvailableQuantity()).isEqualTo(before + firstAdd + secondAdd);
++    }
++
++    private Product addAfterBarrier(UUID productId, int quantity, CountDownLatch ready, CountDownLatch start)
++            throws Exception {
++        ready.countDown();
++        assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
++        return api("INVENTORY_ADMIN").addStock(productId, stockRequest(quantity));
++    }
++
++    private static CreateProductRequest createRequest(String name, int initialQuantity) {
++        return new CreateProductRequest().name(name).initialQuantity(initialQuantity);
++    }
++
++    private static AddStockRequest stockRequest(int quantity) {
++        return new AddStockRequest().quantity(quantity);
++    }
++
++    private ProductsApi api(String role) {
++        String token = token(role);
++        return new ProductsApi(new ApiClient()
++                .setScheme("http")
++                .setHost("localhost")
++                .setPort(port)
++                .setRequestInterceptor(request -> request.header("Authorization", "Bearer " + token)));
++    }
++
++    private ProductsApi anonymousApi() {
++        return new ProductsApi(new ApiClient().setScheme("http").setHost("localhost").setPort(port));
++    }
++
++    private static String token(String role) {
++        var rsaKey = new RSAKey.Builder((RSAPublicKey) SIGNING_KEY.getPublic())
++                .privateKey((RSAPrivateKey) SIGNING_KEY.getPrivate())
++                .keyID(KEY_ID)
++                .build();
++        var encoder = new NimbusJwtEncoder(new ImmutableJWKSet<SecurityContext>(new JWKSet(rsaKey)));
++        Instant now = Instant.now();
++        var claims = JwtClaimsSet.builder()
++                .issuer(ISSUER)
++                .subject(role.toLowerCase())
++                .audience(List.of("inventory-api"))
++                .issuedAt(now.minusSeconds(5))
++                .notBefore(now.minusSeconds(5))
++                .expiresAt(now.plusSeconds(300))
++                .claim("scope", "inventory-api")
++                .claim("realm_access", Map.of("roles", List.of(role)))
++                .build();
++        return encoder.encode(JwtEncoderParameters.from(
++                        JwsHeader.with(SignatureAlgorithm.RS256).keyId(KEY_ID).build(), claims))
++                .getTokenValue();
++    }
++
++    private static void assertApiProblem(ThrowingApiCall call, int expectedStatus) {
++        assertThatThrownBy(call::execute)
++                .isInstanceOfSatisfying(ApiException.class, exception -> {
++                    assertThat(exception.getCode()).isEqualTo(expectedStatus);
++                    if (expectedStatus >= 400 && expectedStatus != 401 && expectedStatus != 403) {
++                        assertThat(exception.getResponseHeaders().firstValue("content-type"))
++                                .hasValueSatisfying(value -> assertThat(value).startsWith("application/problem+json"));
++                        var body = JSON.readTree(exception.getResponseBody());
++                        assertThat(body.get("status").asInt()).isEqualTo(expectedStatus);
++                        assertThat(body.get("title").asString()).isNotBlank();
++                    }
++                });
++    }
++
++    private static KeyPair generateKeyPair() {
++        try {
++            var generator = KeyPairGenerator.getInstance("RSA");
++            generator.initialize(2048);
++            return generator.generateKeyPair();
++        } catch (Exception exception) {
++            throw new IllegalStateException("Cannot generate JWT test key", exception);
++        }
++    }
++
++    private static HttpServer startJwksServer() {
++        try {
++            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
++            var publicKey = new RSAKey.Builder((RSAPublicKey) SIGNING_KEY.getPublic()).keyID(KEY_ID).build();
++            byte[] body = new JWKSet(publicKey).toString().getBytes(StandardCharsets.UTF_8);
++            server.createContext("/jwks", exchange -> {
++                exchange.getResponseHeaders().add("Content-Type", "application/json");
++                exchange.sendResponseHeaders(200, body.length);
++                exchange.getResponseBody().write(body);
++                exchange.close();
++            });
++            server.start();
++            return server;
++        } catch (IOException exception) {
++            throw new IllegalStateException("Cannot start JWKS test server", exception);
++        }
++    }
++
++    @FunctionalInterface
++    private interface ThrowingApiCall {
++        void execute() throws Exception;
++    }
++}
+diff --git a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/AuthorizationTest.java b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/AuthorizationTest.java
+index d63f827..6d00451 100644
+--- a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/AuthorizationTest.java
++++ b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/AuthorizationTest.java
+@@ -1,76 +1,86 @@
+ package io.github.tmejs.reservation.inventory.security;
+ 
+ import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
++import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+ 
++import io.github.tmejs.reservation.inventory.support.InventoryPostgresIntegrationTest;
+ import java.util.List;
+ import java.util.Map;
+ import org.junit.jupiter.api.Test;
+ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.boot.test.context.SpringBootTest;
+ import org.springframework.boot.test.context.TestConfiguration;
+ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+ import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
+ import org.springframework.context.annotation.Bean;
+ import org.springframework.context.annotation.Import;
++import org.springframework.http.MediaType;
+ import org.springframework.security.oauth2.jwt.JwtDecoder;
+ import org.springframework.test.web.servlet.MockMvc;
+ import org.springframework.test.web.servlet.request.RequestPostProcessor;
+ import org.springframework.web.bind.annotation.GetMapping;
+-import org.springframework.web.bind.annotation.PostMapping;
+ import org.springframework.web.bind.annotation.RestController;
+ 
+ @SpringBootTest
+ @AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
+ @Import(AuthorizationTest.FixtureConfiguration.class)
+-class AuthorizationTest {
++class AuthorizationTest extends InventoryPostgresIntegrationTest {
+ 
+     @Autowired
+     private MockMvc mockMvc;
+ 
+     @Autowired
+     private RealmRoleConverter authoritiesConverter;
+ 
+     @Test
+     void rejectsMissingToken() throws Exception {
+         mockMvc.perform(get("/products"))
+                 .andExpect(status().isUnauthorized());
+     }
+ 
+     @Test
+     void customerCanReadProductsButCannotMutateStock() throws Exception {
+         var customer = token("alice-subject", List.of("CUSTOMER"), "inventory-api");
+ 
+         mockMvc.perform(get("/products").with(customer)).andExpect(status().isOk());
+         mockMvc.perform(get("/products/00000000-0000-0000-0000-000000000001")
+                         .with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
+-                .andExpect(status().isOk());
++                .andExpect(status().isNotFound());
+         mockMvc.perform(post("/products").with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
+                 .andExpect(status().isForbidden());
+         mockMvc.perform(post("/products/00000000-0000-0000-0000-000000000001/stock")
+                         .with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
+                 .andExpect(status().isForbidden());
+     }
+ 
+     @Test
+     void inventoryAdministratorCanReadAndMutateProducts() throws Exception {
+         mockMvc.perform(get("/products")
+                         .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api")))
+                 .andExpect(status().isOk());
+-        mockMvc.perform(post("/products")
+-                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api")))
+-                .andExpect(status().isOk());
+-        mockMvc.perform(post("/products/00000000-0000-0000-0000-000000000001/stock")
+-                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api")))
++        var location = mockMvc.perform(post("/products")
++                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api"))
++                        .contentType(MediaType.APPLICATION_JSON)
++                        .content("{\"name\":\"Policy fixture\",\"initialQuantity\":1}"))
++                .andExpect(status().isCreated())
++                .andExpect(header().exists("Location"))
++                .andReturn()
++                .getResponse()
++                .getHeader("Location");
++        mockMvc.perform(post(location + "/stock")
++                        .with(token("admin-subject", List.of("INVENTORY_ADMIN"), "inventory-api"))
++                        .contentType(MediaType.APPLICATION_JSON)
++                        .content("{\"quantity\":1}"))
+                 .andExpect(status().isOk());
+     }
+ 
+     @Test
+     void monitoringScopeCanUseMetricsButNotBusinessRoutes() throws Exception {
+         mockMvc.perform(get("/actuator/prometheus")
+                         .with(token("monitoring", List.of(), "inventory-api metrics.read")))
+                 .andExpect(status().isOk());
+         mockMvc.perform(get("/products")
+                         .with(token("monitoring", List.of(), "inventory-api metrics.read")))
+@@ -115,30 +125,20 @@ class AuthorizationTest {
+ 
+         @Bean
+         FixtureEndpoints fixtureEndpoints() {
+             return new FixtureEndpoints();
+         }
+     }
+ 
+     @RestController
+     static class FixtureEndpoints {
+ 
+-        @GetMapping({"/products", "/products/{id}"})
+-        String readProduct() {
+-            return "product";
+-        }
+-
+-        @PostMapping({"/products", "/products/{id}/stock"})
+-        String mutateProduct() {
+-            return "mutated";
+-        }
+-
+         @GetMapping("/actuator/prometheus")
+         String metrics() {
+             return "metrics";
+         }
+ 
+         @GetMapping("/actuator/health")
+         String health() {
+             return "up";
+         }
+ 
+diff --git a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/JwtValidationIT.java b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/JwtValidationIT.java
+index 91d58d0..15bfb4d 100644
+--- a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/JwtValidationIT.java
++++ b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/security/JwtValidationIT.java
+@@ -1,20 +1,21 @@
+ package io.github.tmejs.reservation.inventory.security;
+ 
+ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+ 
+ import com.nimbusds.jose.jwk.JWKSet;
+ import com.nimbusds.jose.jwk.RSAKey;
+ import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+ import com.nimbusds.jose.proc.SecurityContext;
+ import com.sun.net.httpserver.HttpServer;
++import io.github.tmejs.reservation.inventory.support.InventoryPostgresIntegrationTest;
+ import java.io.IOException;
+ import java.net.InetAddress;
+ import java.net.InetSocketAddress;
+ import java.nio.charset.StandardCharsets;
+ import java.security.KeyPair;
+ import java.security.KeyPairGenerator;
+ import java.security.interfaces.RSAPrivateKey;
+ import java.security.interfaces.RSAPublicKey;
+ import java.time.Instant;
+ import java.util.List;
+@@ -35,21 +36,21 @@ import org.springframework.security.oauth2.jwt.JwsHeader;
+ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+ import org.springframework.test.context.DynamicPropertyRegistry;
+ import org.springframework.test.context.DynamicPropertySource;
+ import org.springframework.test.web.servlet.MockMvc;
+ import org.springframework.web.bind.annotation.GetMapping;
+ import org.springframework.web.bind.annotation.RestController;
+ 
+ @SpringBootTest
+ @AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
+ @Import(JwtValidationIT.FixtureConfiguration.class)
+-class JwtValidationIT {
++class JwtValidationIT extends InventoryPostgresIntegrationTest {
+ 
+     private static final String KEY_ID = "inventory-test-key";
+     private static final String ISSUER = "https://issuer.example/realms/reservation";
+     private static final String AUDIENCE = "inventory-api";
+     private static final KeyPair SIGNING_KEY = generateKeyPair();
+     private static final KeyPair WRONG_KEY = generateKeyPair();
+     private static final HttpServer JWKS_SERVER = startJwksServer();
+ 
+     @Autowired
+     private MockMvc mockMvc;
+diff --git a/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/support/InventoryPostgresIntegrationTest.java b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/support/InventoryPostgresIntegrationTest.java
+new file mode 100644
+index 0000000..4684ff8
+--- /dev/null
++++ b/inventory-service/src/test/java/io/github/tmejs/reservation/inventory/support/InventoryPostgresIntegrationTest.java
+@@ -0,0 +1,25 @@
++package io.github.tmejs.reservation.inventory.support;
++
++import org.springframework.test.context.DynamicPropertyRegistry;
++import org.springframework.test.context.DynamicPropertySource;
++import org.testcontainers.postgresql.PostgreSQLContainer;
++
++public abstract class InventoryPostgresIntegrationTest {
++
++    private static final PostgreSQLContainer DATABASE =
++            new PostgreSQLContainer("postgres:18.1")
++                    .withDatabaseName("inventory")
++                    .withUsername("inventory")
++                    .withPassword("inventory");
++
++    static {
++        DATABASE.start();
++    }
++
++    @DynamicPropertySource
++    static void databaseProperties(DynamicPropertyRegistry registry) {
++        registry.add("spring.datasource.url", DATABASE::getJdbcUrl);
++        registry.add("spring.datasource.username", DATABASE::getUsername);
++        registry.add("spring.datasource.password", DATABASE::getPassword);
++    }
++}
+diff --git a/order-service/pom.xml b/order-service/pom.xml
+index f178540..d0ce567 100644
+--- a/order-service/pom.xml
++++ b/order-service/pom.xml
+@@ -19,20 +19,41 @@
+             <version>${project.version}</version>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-webmvc</artifactId>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-validation</artifactId>
+         </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-data-jpa</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.flywaydb</groupId>
++            <artifactId>flyway-core</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-flyway</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.flywaydb</groupId>
++            <artifactId>flyway-database-postgresql</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.postgresql</groupId>
++            <artifactId>postgresql</artifactId>
++            <scope>runtime</scope>
++        </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+         </dependency>
+         <dependency>
+             <groupId>org.springdoc</groupId>
+             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+             <version>${springdoc.version}</version>
+         </dependency>
+         <dependency>
+@@ -57,20 +78,25 @@
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-security-oauth2-resource-server-test</artifactId>
+             <scope>test</scope>
+         </dependency>
+         <dependency>
+             <groupId>org.testcontainers</groupId>
+             <artifactId>testcontainers</artifactId>
+             <scope>test</scope>
+         </dependency>
++        <dependency>
++            <groupId>org.testcontainers</groupId>
++            <artifactId>testcontainers-postgresql</artifactId>
++            <scope>test</scope>
++        </dependency>
+     </dependencies>
+ 
+     <build>
+         <plugins>
+             <plugin>
+                 <groupId>org.apache.maven.plugins</groupId>
+                 <artifactId>maven-dependency-plugin</artifactId>
+                 <version>${maven-dependency-plugin.version}</version>
+                 <executions>
+                     <execution>
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/OutboxEntity.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/OutboxEntity.java
+new file mode 100644
+index 0000000..0ef574c
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/OutboxEntity.java
+@@ -0,0 +1,48 @@
++package io.github.tmejs.reservation.orders.messaging;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++import java.time.Instant;
++import java.util.UUID;
++
++@Entity
++@Table(name = "outbox")
++public class OutboxEntity {
++
++    @Id
++    private UUID id;
++
++    @Column(name = "event_id", nullable = false, unique = true)
++    private UUID eventId;
++
++    @Column(name = "order_id", nullable = false)
++    private UUID orderId;
++
++    @Column(name = "event_type", nullable = false, length = 128)
++    private String eventType;
++
++    @Column(nullable = false, length = 255)
++    private String topic;
++
++    @Column(nullable = false, columnDefinition = "text")
++    private String payload;
++
++    @Column(name = "created_at", nullable = false)
++    private Instant createdAt;
++
++    @Column(name = "next_attempt_at", nullable = false)
++    private Instant nextAttemptAt;
++
++    @Column(name = "attempt_count", nullable = false)
++    private int attemptCount;
++
++    @Column(name = "published_at")
++    private Instant publishedAt;
++
++    @Column(name = "last_error", columnDefinition = "text")
++    private String lastError;
++
++    protected OutboxEntity() {}
++}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/ProcessedEventEntity.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/ProcessedEventEntity.java
+new file mode 100644
+index 0000000..37439d0
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/ProcessedEventEntity.java
+@@ -0,0 +1,22 @@
++package io.github.tmejs.reservation.orders.messaging;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++import java.time.Instant;
++import java.util.UUID;
++
++@Entity
++@Table(name = "processed_events")
++public class ProcessedEventEntity {
++
++    @Id
++    @Column(name = "event_id")
++    private UUID eventId;
++
++    @Column(name = "processed_at", nullable = false)
++    private Instant processedAt;
++
++    protected ProcessedEventEntity() {}
++}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderEntity.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderEntity.java
+new file mode 100644
+index 0000000..8f03621
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderEntity.java
+@@ -0,0 +1,33 @@
++package io.github.tmejs.reservation.orders.order;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Table;
++import java.time.Instant;
++import java.util.UUID;
++
++@Entity
++@Table(name = "orders")
++public class OrderEntity {
++
++    @Id
++    private UUID id;
++
++    @Column(name = "owner_subject", nullable = false, length = 255)
++    private String ownerSubject;
++
++    @Column(nullable = false, length = 32)
++    private String status;
++
++    @Column(name = "rejection_reason", length = 64)
++    private String rejectionReason;
++
++    @Column(name = "created_at", nullable = false)
++    private Instant createdAt;
++
++    @Column(name = "updated_at", nullable = false)
++    private Instant updatedAt;
++
++    protected OrderEntity() {}
++}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderItemEntity.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderItemEntity.java
+new file mode 100644
+index 0000000..6e437c9
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderItemEntity.java
+@@ -0,0 +1,30 @@
++package io.github.tmejs.reservation.orders.order;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.Id;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.Table;
++import java.util.UUID;
++
++@Entity
++@Table(name = "order_items")
++public class OrderItemEntity {
++
++    @Id
++    private UUID id;
++
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "order_id", nullable = false)
++    private OrderEntity order;
++
++    @Column(name = "product_id", nullable = false)
++    private UUID productId;
++
++    @Column(nullable = false)
++    private int quantity;
++
++    protected OrderItemEntity() {}
++}
+diff --git a/order-service/src/main/resources/application.yaml b/order-service/src/main/resources/application.yaml
+index f93c999..8bf3b6f 100644
+--- a/order-service/src/main/resources/application.yaml
++++ b/order-service/src/main/resources/application.yaml
+@@ -1,13 +1,23 @@
+ spring:
+   application:
+     name: order-service
++  datasource:
++    url: ${DB_URL:jdbc:postgresql://localhost:5432/orders}
++    username: ${DB_USERNAME:orders}
++    password: ${DB_PASSWORD:orders}
++  flyway:
++    locations: classpath:db/migration
++  jpa:
++    hibernate:
++      ddl-auto: validate
++    open-in-view: false
+   security:
+     oauth2:
+       resourceserver:
+         jwt:
+           issuer-uri: ${SECURITY_ISSUER_URI:http://localhost:8180/realms/reservation}
+           jwk-set-uri: ${SECURITY_JWK_SET_URI:http://localhost:8180/realms/reservation/protocol/openid-connect/certs}
+           audiences: orders-api
+ 
+ server:
+   port: 8080
+diff --git a/order-service/src/main/resources/db/migration/V1__initial_schema.sql b/order-service/src/main/resources/db/migration/V1__initial_schema.sql
+new file mode 100644
+index 0000000..ef8fb5c
+--- /dev/null
++++ b/order-service/src/main/resources/db/migration/V1__initial_schema.sql
+@@ -0,0 +1,64 @@
++CREATE TABLE orders (
++    id UUID PRIMARY KEY,
++    owner_subject VARCHAR(255) NOT NULL,
++    status VARCHAR(32) NOT NULL,
++    rejection_reason VARCHAR(64),
++    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
++    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
++    CONSTRAINT chk_orders_status CHECK (status IN ('PENDING', 'CONFIRMED', 'REJECTED')),
++    CONSTRAINT chk_orders_rejection_reason CHECK (
++        (status = 'REJECTED' AND rejection_reason IS NOT NULL)
++        OR (status <> 'REJECTED' AND rejection_reason IS NULL)
++    )
++);
++
++CREATE INDEX idx_orders_owner_id ON orders (owner_subject, id);
++
++CREATE TABLE order_items (
++    id UUID PRIMARY KEY,
++    order_id UUID NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
++    product_id UUID NOT NULL,
++    quantity INTEGER NOT NULL,
++    CONSTRAINT uq_order_items_order_product UNIQUE (order_id, product_id),
++    CONSTRAINT chk_order_items_quantity CHECK (quantity > 0)
++);
++
++CREATE TABLE idempotency_keys (
++    owner_subject VARCHAR(255) NOT NULL,
++    idempotency_key VARCHAR(255) NOT NULL,
++    request_fingerprint CHAR(64) NOT NULL,
++    order_id UUID REFERENCES orders (id),
++    response_payload TEXT,
++    response_location VARCHAR(512),
++    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
++    PRIMARY KEY (owner_subject, idempotency_key),
++    CONSTRAINT uq_idempotency_order UNIQUE (order_id),
++    CONSTRAINT chk_idempotency_response CHECK (
++        (order_id IS NULL AND response_payload IS NULL AND response_location IS NULL)
++        OR (order_id IS NOT NULL AND response_payload IS NOT NULL AND response_location IS NOT NULL)
++    )
++);
++
++CREATE TABLE outbox (
++    id UUID PRIMARY KEY,
++    event_id UUID NOT NULL,
++    order_id UUID NOT NULL,
++    event_type VARCHAR(128) NOT NULL,
++    topic VARCHAR(255) NOT NULL,
++    payload TEXT NOT NULL,
++    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
++    next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL,
++    attempt_count INTEGER NOT NULL DEFAULT 0,
++    published_at TIMESTAMP WITH TIME ZONE,
++    last_error TEXT,
++    CONSTRAINT uq_outbox_event_id UNIQUE (event_id),
++    CONSTRAINT chk_outbox_attempt_count CHECK (attempt_count >= 0)
++);
++
++CREATE INDEX idx_outbox_pending ON outbox (next_attempt_at, created_at)
++    WHERE published_at IS NULL;
++
++CREATE TABLE processed_events (
++    event_id UUID PRIMARY KEY,
++    processed_at TIMESTAMP WITH TIME ZONE NOT NULL
++);
+diff --git a/order-service/src/test/java/io/github/tmejs/reservation/orders/MigrationIT.java b/order-service/src/test/java/io/github/tmejs/reservation/orders/MigrationIT.java
+new file mode 100644
+index 0000000..2c33d01
+--- /dev/null
++++ b/order-service/src/test/java/io/github/tmejs/reservation/orders/MigrationIT.java
+@@ -0,0 +1,102 @@
++package io.github.tmejs.reservation.orders;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++
++import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
++import jakarta.persistence.EntityManagerFactory;
++import java.sql.Timestamp;
++import java.time.Instant;
++import java.util.Set;
++import java.util.UUID;
++import java.util.stream.Collectors;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.context.SpringBootTest;
++import org.springframework.dao.DataIntegrityViolationException;
++import org.springframework.jdbc.core.JdbcTemplate;
++
++@SpringBootTest
++class MigrationIT extends OrderPostgresIntegrationTest {
++
++    @Autowired
++    private JdbcTemplate jdbc;
++
++    @Autowired
++    private EntityManagerFactory entityManagerFactory;
++
++    @Test
++    void migratesCompleteOrderSchemaAndValidatesMappings() {
++        assertThat(tableNames()).containsExactlyInAnyOrder(
++                "flyway_schema_history",
++                "orders",
++                "order_items",
++                "idempotency_keys",
++                "outbox",
++                "processed_events");
++        assertThat(entityNames()).contains(
++                "OrderEntity", "OrderItemEntity", "OutboxEntity", "ProcessedEventEntity");
++        assertThat(jdbc.queryForObject(
++                        "select count(*) from flyway_schema_history where success", Integer.class))
++                .isEqualTo(1);
++        assertThat(jdbc.queryForObject(
++                        "select data_type from information_schema.columns "
++                                + "where table_schema = 'public' and table_name = 'outbox' and column_name = 'payload'",
++                        String.class))
++                .isEqualTo("text");
++        assertThat(jdbc.queryForObject(
++                        "select indexdef from pg_indexes where schemaname = 'public' "
++                                + "and tablename = 'outbox' and indexname = 'idx_outbox_pending'",
++                        String.class))
++                .contains("WHERE (published_at IS NULL)");
++    }
++
++    @Test
++    void enforcesOrderIdempotencyEventAndQuantityConstraints() {
++        UUID orderId = UUID.randomUUID();
++        jdbc.update(
++                "insert into orders(id, owner_subject, status, created_at, updated_at) values (?, ?, ?, ?, ?)",
++                orderId,
++                "alice",
++                "PENDING",
++                Timestamp.from(Instant.now()),
++                Timestamp.from(Instant.now()));
++        jdbc.update(
++                "insert into idempotency_keys(owner_subject, idempotency_key, request_fingerprint, created_at) "
++                        + "values (?, ?, ?, ?)",
++                "alice",
++                "request-1",
++                "a".repeat(64),
++                Timestamp.from(Instant.now()));
++        jdbc.update(
++                "insert into processed_events(event_id, processed_at) values (?, ?)",
++                UUID.randomUUID(),
++                Timestamp.from(Instant.now()));
++
++        assertThatThrownBy(() -> jdbc.update(
++                        "insert into order_items(order_id, product_id, quantity) values (?, ?, ?)",
++                        orderId,
++                        UUID.randomUUID(),
++                        0))
++                .isInstanceOf(DataIntegrityViolationException.class);
++        assertThatThrownBy(() -> jdbc.update(
++                        "insert into idempotency_keys(owner_subject, idempotency_key, request_fingerprint, created_at) "
++                                + "values (?, ?, ?, ?)",
++                        "alice",
++                        "request-1",
++                        "b".repeat(64),
++                        Timestamp.from(Instant.now())))
++                .isInstanceOf(DataIntegrityViolationException.class);
++    }
++
++    private Set<String> tableNames() {
++        return Set.copyOf(jdbc.queryForList(
++                "select table_name from information_schema.tables where table_schema = 'public'", String.class));
++    }
++
++    private Set<String> entityNames() {
++        return entityManagerFactory.getMetamodel().getEntities().stream()
++                .map(entity -> entity.getName())
++                .collect(Collectors.toSet());
++    }
++}
+diff --git a/order-service/src/test/java/io/github/tmejs/reservation/orders/config/OpenApiExposureIT.java b/order-service/src/test/java/io/github/tmejs/reservation/orders/config/OpenApiExposureIT.java
+index 20c55c4..d35129d 100644
+--- a/order-service/src/test/java/io/github/tmejs/reservation/orders/config/OpenApiExposureIT.java
++++ b/order-service/src/test/java/io/github/tmejs/reservation/orders/config/OpenApiExposureIT.java
+@@ -6,23 +6,24 @@ import java.io.IOException;
+ import java.net.URI;
+ import java.net.http.HttpClient;
+ import java.net.http.HttpRequest;
+ import java.net.http.HttpResponse;
+ import java.nio.charset.StandardCharsets;
+ import org.junit.jupiter.api.Test;
+ import org.springframework.boot.test.context.SpringBootTest;
+ import org.springframework.boot.test.web.server.LocalServerPort;
+ import org.springframework.core.io.ClassPathResource;
+ import io.github.tmejs.reservation.orders.OrderApplication;
++import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
+ 
+ @SpringBootTest(classes = OrderApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+-class OpenApiExposureIT {
++class OpenApiExposureIT extends OrderPostgresIntegrationTest {
+ 
+     private final HttpClient client = HttpClient.newHttpClient();
+ 
+     @LocalServerPort
+     private int port;
+ 
+     @Test
+     void servesOriginalOrdersContract() throws Exception {
+         var expected = new ClassPathResource("openapi/orders.yaml")
+                 .getContentAsString(StandardCharsets.UTF_8);
+diff --git a/order-service/src/test/java/io/github/tmejs/reservation/orders/security/AuthorizationTest.java b/order-service/src/test/java/io/github/tmejs/reservation/orders/security/AuthorizationTest.java
+index 9b9ba4d..3648784 100644
+--- a/order-service/src/test/java/io/github/tmejs/reservation/orders/security/AuthorizationTest.java
++++ b/order-service/src/test/java/io/github/tmejs/reservation/orders/security/AuthorizationTest.java
+@@ -1,39 +1,40 @@
+ package io.github.tmejs.reservation.orders.security;
+ 
+ import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+ 
+ import java.util.List;
+ import java.util.Map;
++import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
+ import org.junit.jupiter.api.Test;
+ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.boot.test.context.SpringBootTest;
+ import org.springframework.boot.test.context.TestConfiguration;
+ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+ import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
+ import org.springframework.context.annotation.Bean;
+ import org.springframework.context.annotation.Import;
+ import org.springframework.security.oauth2.jwt.JwtDecoder;
+ import org.springframework.test.web.servlet.MockMvc;
+ import org.springframework.test.web.servlet.request.RequestPostProcessor;
+ import org.springframework.web.bind.annotation.GetMapping;
+ import org.springframework.web.bind.annotation.PostMapping;
+ import org.springframework.web.bind.annotation.RestController;
+ 
+ @SpringBootTest
+ @AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
+ @Import(AuthorizationTest.FixtureConfiguration.class)
+-class AuthorizationTest {
++class AuthorizationTest extends OrderPostgresIntegrationTest {
+ 
+     @Autowired
+     private MockMvc mockMvc;
+ 
+     @Autowired
+     private RealmRoleConverter authoritiesConverter;
+ 
+     @Test
+     void rejectsMissingToken() throws Exception {
+         mockMvc.perform(post("/orders"))
+diff --git a/order-service/src/test/java/io/github/tmejs/reservation/orders/security/JwtValidationIT.java b/order-service/src/test/java/io/github/tmejs/reservation/orders/security/JwtValidationIT.java
+index 270b13f..66711dc 100644
+--- a/order-service/src/test/java/io/github/tmejs/reservation/orders/security/JwtValidationIT.java
++++ b/order-service/src/test/java/io/github/tmejs/reservation/orders/security/JwtValidationIT.java
+@@ -1,20 +1,21 @@
+ package io.github.tmejs.reservation.orders.security;
+ 
+ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+ 
+ import com.nimbusds.jose.jwk.JWKSet;
+ import com.nimbusds.jose.jwk.RSAKey;
+ import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+ import com.nimbusds.jose.proc.SecurityContext;
+ import com.sun.net.httpserver.HttpServer;
++import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
+ import java.io.IOException;
+ import java.net.InetAddress;
+ import java.net.InetSocketAddress;
+ import java.nio.charset.StandardCharsets;
+ import java.security.KeyPair;
+ import java.security.KeyPairGenerator;
+ import java.security.interfaces.RSAPrivateKey;
+ import java.security.interfaces.RSAPublicKey;
+ import java.time.Instant;
+ import java.util.List;
+@@ -35,21 +36,21 @@ import org.springframework.security.oauth2.jwt.JwsHeader;
+ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+ import org.springframework.test.context.DynamicPropertyRegistry;
+ import org.springframework.test.context.DynamicPropertySource;
+ import org.springframework.test.web.servlet.MockMvc;
+ import org.springframework.web.bind.annotation.GetMapping;
+ import org.springframework.web.bind.annotation.RestController;
+ 
+ @SpringBootTest
+ @AutoConfigureMockMvc(print = MockMvcPrint.NONE, printOnlyOnFailure = false)
+ @Import(JwtValidationIT.FixtureConfiguration.class)
+-class JwtValidationIT {
++class JwtValidationIT extends OrderPostgresIntegrationTest {
+ 
+     private static final String KEY_ID = "orders-test-key";
+     private static final String ISSUER = "https://issuer.example/realms/reservation";
+     private static final String AUDIENCE = "orders-api";
+     private static final KeyPair SIGNING_KEY = generateKeyPair();
+     private static final KeyPair WRONG_KEY = generateKeyPair();
+     private static final HttpServer JWKS_SERVER = startJwksServer();
+ 
+     @Autowired
+     private MockMvc mockMvc;
+diff --git a/order-service/src/test/java/io/github/tmejs/reservation/orders/support/OrderPostgresIntegrationTest.java b/order-service/src/test/java/io/github/tmejs/reservation/orders/support/OrderPostgresIntegrationTest.java
+new file mode 100644
+index 0000000..6555e0f
+--- /dev/null
++++ b/order-service/src/test/java/io/github/tmejs/reservation/orders/support/OrderPostgresIntegrationTest.java
+@@ -0,0 +1,25 @@
++package io.github.tmejs.reservation.orders.support;
++
++import org.springframework.test.context.DynamicPropertyRegistry;
++import org.springframework.test.context.DynamicPropertySource;
++import org.testcontainers.postgresql.PostgreSQLContainer;
++
++public abstract class OrderPostgresIntegrationTest {
++
++    private static final PostgreSQLContainer DATABASE =
++            new PostgreSQLContainer("postgres:18.1")
++                    .withDatabaseName("orders")
++                    .withUsername("orders")
++                    .withPassword("orders");
++
++    static {
++        DATABASE.start();
++    }
++
++    @DynamicPropertySource
++    static void databaseProperties(DynamicPropertyRegistry registry) {
++        registry.add("spring.datasource.url", DATABASE::getJdbcUrl);
++        registry.add("spring.datasource.username", DATABASE::getUsername);
++        registry.add("spring.datasource.password", DATABASE::getPassword);
++    }
++}

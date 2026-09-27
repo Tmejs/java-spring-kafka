@@ -1,0 +1,95 @@
+diff --git a/api-contracts/src/main/resources/openapi/orders.yaml b/api-contracts/src/main/resources/openapi/orders.yaml
+index 36e3177..42b07be 100644
+--- a/api-contracts/src/main/resources/openapi/orders.yaml
++++ b/api-contracts/src/main/resources/openapi/orders.yaml
+@@ -150,7 +150,6 @@ components:
+         items:
+           type: array
+           minItems: 1
+-          uniqueItems: true
+           description: |
+             Items to reserve. `productId` values must be distinct within the order;
+             repeating a product with a different quantity is also invalid.
+diff --git a/codex/execution/task-4-report.md b/codex/execution/task-4-report.md
+index 259e640..410b82f 100644
+--- a/codex/execution/task-4-report.md
++++ b/codex/execution/task-4-report.md
+@@ -22,9 +22,14 @@ completion flow, so no migration was changed or added.
+ - RED: `OrderCreationIT` reached the real secured HTTP service and returned `404`
+   for the five missing endpoint behaviors. GREEN: 5 generated-client tests passed
+   with PostgreSQL 18.1 and RSA-signed JWTs.
++- Review RED: a raw request containing the same `{productId, quantity}` object twice
++  returned `202` because request `uniqueItems` generated a `Set` and collapsed the
++  duplicate before domain validation. GREEN: request items now generate as a `List`;
++  the unchanged product-id validation returns `400` and persists no order,
++  idempotency key, or outbox row. Focused `OrderCreationIT`: 6 tests passed.
+ - HTTP coverage includes original-response replay after status mutation, changed
+   payload conflict, simultaneous same-key requests, Alice/Bob using the same key,
+   owner-isolated GET, empty/duplicate items, injected-clock event timestamps, and
+   one pending outbox row.
+ - Full local gate: SDKMAN Temurin Java `25.0.4`, `./mvnw -B verify` — PASS,
+-  49 tests, 0 failures/errors/skips (the prior 40 plus 9 task 4 tests).
++  50 tests, 0 failures/errors/skips (the prior 40 plus 10 task 4 tests).
+diff --git a/order-service/src/test/java/io/github/tmejs/reservation/orders/order/OrderCreationIT.java b/order-service/src/test/java/io/github/tmejs/reservation/orders/order/OrderCreationIT.java
+index 362c60f..8f71893 100644
+--- a/order-service/src/test/java/io/github/tmejs/reservation/orders/order/OrderCreationIT.java
++++ b/order-service/src/test/java/io/github/tmejs/reservation/orders/order/OrderCreationIT.java
+@@ -23,6 +23,10 @@ import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
+ import java.io.IOException;
+ import java.net.InetAddress;
+ import java.net.InetSocketAddress;
++import java.net.URI;
++import java.net.http.HttpClient;
++import java.net.http.HttpRequest;
++import java.net.http.HttpResponse;
+ import java.nio.charset.StandardCharsets;
+ import java.security.KeyPair;
+ import java.security.KeyPairGenerator;
+@@ -31,7 +35,6 @@ import java.security.interfaces.RSAPublicKey;
+ import java.time.Clock;
+ import java.time.Instant;
+ import java.time.ZoneOffset;
+-import java.util.LinkedHashSet;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.UUID;
+@@ -191,6 +194,30 @@ class OrderCreationIT extends OrderPostgresIntegrationTest {
+         assertThat(jdbc.queryForObject("select count(*) from outbox", Integer.class)).isZero();
+     }
+ 
++    @Test
++    void rejectsTwoExactlyIdenticalJsonItemsBeforePersistence() throws Exception {
++        UUID productId = UUID.randomUUID();
++        String body = """
++                {"items":[
++                  {"productId":"%s","quantity":2},
++                  {"productId":"%s","quantity":2}
++                ]}
++                """.formatted(productId, productId);
++        var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/orders"))
++                .header("Authorization", "Bearer " + token("alice-subject"))
++                .header("Content-Type", "application/json")
++                .header("Idempotency-Key", "exact-duplicate")
++                .POST(HttpRequest.BodyPublishers.ofString(body))
++                .build();
++
++        var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
++
++        assertThat(response.statusCode()).isEqualTo(400);
++        assertThat(jdbc.queryForObject("select count(*) from orders", Integer.class)).isZero();
++        assertThat(jdbc.queryForObject("select count(*) from idempotency_keys", Integer.class)).isZero();
++        assertThat(jdbc.queryForObject("select count(*) from outbox", Integer.class)).isZero();
++    }
++
+     private Order createAfterBarrier(
+             String subject, UUID productId, CountDownLatch ready, CountDownLatch start) throws Exception {
+         ready.countDown();
+@@ -208,7 +235,7 @@ class OrderCreationIT extends OrderPostgresIntegrationTest {
+     }
+ 
+     private static CreateOrderRequest request(OrderItem... items) {
+-        return new CreateOrderRequest().items(new LinkedHashSet<>(List.of(items)));
++        return new CreateOrderRequest().items(List.of(items));
+     }
+ 
+     private static OrderItem item(UUID productId, int quantity) {

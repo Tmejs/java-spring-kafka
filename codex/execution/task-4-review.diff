@@ -1,0 +1,1252 @@
+diff --git a/codex/execution/task-4-report.md b/codex/execution/task-4-report.md
+new file mode 100644
+index 0000000..259e640
+--- /dev/null
++++ b/codex/execution/task-4-report.md
+@@ -0,0 +1,30 @@
++# Task 4 report — event contracts and atomic order creation
++
++Implemented explicit versioned JSON records and typed decoders for `OrderCreated`,
++`StockReserved`, and `StockRejected`. The codec rejects malformed JSON, wrong event
++types, and unsupported versions without Java type metadata.
++
++Orders now implements the generated `OrdersApi`. Creation derives ownership only
++from `CurrentOwner`, canonicalizes lines by product UUID, fingerprints the canonical
++UTF-8 representation with SHA-256, and claims `(owner_subject, idempotency_key)`
++using PostgreSQL `INSERT ... ON CONFLICT DO NOTHING`. A single transaction writes
++the order and items, original response and Location, and `OrderCreated` outbox row.
++Matching retries replay the stored `202` response; changed payloads return `409`.
++GET uses an owner-qualified repository query and returns current status/reason.
++
++The task 3 V1 schema already supported the required nullable claim and atomic
++completion flow, so no migration was changed or added.
++
++## TDD and verification
++
++- RED: `EventCodecTest` failed compilation because the six event contract/codec
++  types did not exist. GREEN: 4 codec tests passed.
++- RED: `OrderCreationIT` reached the real secured HTTP service and returned `404`
++  for the five missing endpoint behaviors. GREEN: 5 generated-client tests passed
++  with PostgreSQL 18.1 and RSA-signed JWTs.
++- HTTP coverage includes original-response replay after status mutation, changed
++  payload conflict, simultaneous same-key requests, Alice/Bob using the same key,
++  owner-isolated GET, empty/duplicate items, injected-clock event timestamps, and
++  one pending outbox row.
++- Full local gate: SDKMAN Temurin Java `25.0.4`, `./mvnw -B verify` — PASS,
++  49 tests, 0 failures/errors/skips (the prior 40 plus 9 task 4 tests).
+diff --git a/event-contracts/pom.xml b/event-contracts/pom.xml
+index 0312288..008b85f 100644
+--- a/event-contracts/pom.xml
++++ b/event-contracts/pom.xml
+@@ -4,11 +4,23 @@
+          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+     <modelVersion>4.0.0</modelVersion>
+ 
+     <parent>
+         <groupId>io.github.tmejs</groupId>
+         <artifactId>reservation-parent</artifactId>
+         <version>0.0.1-SNAPSHOT</version>
+     </parent>
+ 
+     <artifactId>event-contracts</artifactId>
++
++    <dependencies>
++        <dependency>
++            <groupId>tools.jackson.core</groupId>
++            <artifactId>jackson-databind</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.springframework.boot</groupId>
++            <artifactId>spring-boot-starter-test</artifactId>
++            <scope>test</scope>
++        </dependency>
++    </dependencies>
+ </project>
+diff --git a/event-contracts/src/main/java/io/github/tmejs/reservation/events/EventCodec.java b/event-contracts/src/main/java/io/github/tmejs/reservation/events/EventCodec.java
+new file mode 100644
+index 0000000..757334b
+--- /dev/null
++++ b/event-contracts/src/main/java/io/github/tmejs/reservation/events/EventCodec.java
+@@ -0,0 +1,67 @@
++package io.github.tmejs.reservation.events;
++
++import java.util.Objects;
++import java.util.function.Function;
++import tools.jackson.core.JacksonException;
++import tools.jackson.databind.ObjectMapper;
++
++public final class EventCodec {
++
++    public static final int SCHEMA_VERSION = 1;
++    public static final String ORDER_CREATED = "OrderCreated";
++    public static final String STOCK_RESERVED = "StockReserved";
++    public static final String STOCK_REJECTED = "StockRejected";
++
++    private final ObjectMapper objectMapper;
++
++    public EventCodec() {
++        this(new ObjectMapper());
++    }
++
++    public EventCodec(ObjectMapper objectMapper) {
++        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
++    }
++
++    public String encode(Object event) {
++        try {
++            return objectMapper.writeValueAsString(event);
++        } catch (JacksonException exception) {
++            throw new IllegalArgumentException("Event cannot be encoded as JSON", exception);
++        }
++    }
++
++    public OrderCreated decodeOrderCreated(String json) {
++        return decode(json, OrderCreated.class, OrderCreated::metadata, ORDER_CREATED);
++    }
++
++    public StockReserved decodeStockReserved(String json) {
++        return decode(json, StockReserved.class, StockReserved::metadata, STOCK_RESERVED);
++    }
++
++    public StockRejected decodeStockRejected(String json) {
++        return decode(json, StockRejected.class, StockRejected::metadata, STOCK_REJECTED);
++    }
++
++    private <T> T decode(
++            String json, Class<T> eventClass, Function<T, EventMetadata> metadataExtractor, String expectedType) {
++        final T event;
++        try {
++            event = objectMapper.readValue(json, eventClass);
++        } catch (RuntimeException exception) {
++            throw new IllegalArgumentException("Malformed event JSON", exception);
++        }
++
++        EventMetadata metadata = metadataExtractor.apply(event);
++        if (metadata == null) {
++            throw new IllegalArgumentException("Event metadata is required");
++        }
++        if (!expectedType.equals(metadata.eventType())) {
++            throw new IllegalArgumentException(
++                    "Expected event type " + expectedType + " but received " + metadata.eventType());
++        }
++        if (metadata.schemaVersion() != SCHEMA_VERSION) {
++            throw new IllegalArgumentException("Unsupported schema version " + metadata.schemaVersion());
++        }
++        return event;
++    }
++}
+diff --git a/event-contracts/src/main/java/io/github/tmejs/reservation/events/EventMetadata.java b/event-contracts/src/main/java/io/github/tmejs/reservation/events/EventMetadata.java
+new file mode 100644
+index 0000000..aa9aa48
+--- /dev/null
++++ b/event-contracts/src/main/java/io/github/tmejs/reservation/events/EventMetadata.java
+@@ -0,0 +1,7 @@
++package io.github.tmejs.reservation.events;
++
++import java.time.Instant;
++import java.util.UUID;
++
++public record EventMetadata(
++        UUID eventId, String eventType, int schemaVersion, Instant occurredAt, UUID orderId) {}
+diff --git a/event-contracts/src/main/java/io/github/tmejs/reservation/events/OrderCreated.java b/event-contracts/src/main/java/io/github/tmejs/reservation/events/OrderCreated.java
+new file mode 100644
+index 0000000..ffb6467
+--- /dev/null
++++ b/event-contracts/src/main/java/io/github/tmejs/reservation/events/OrderCreated.java
+@@ -0,0 +1,10 @@
++package io.github.tmejs.reservation.events;
++
++import java.util.List;
++
++public record OrderCreated(EventMetadata metadata, List<OrderLine> items) {
++
++    public OrderCreated {
++        items = items == null ? null : List.copyOf(items);
++    }
++}
+diff --git a/event-contracts/src/main/java/io/github/tmejs/reservation/events/OrderLine.java b/event-contracts/src/main/java/io/github/tmejs/reservation/events/OrderLine.java
+new file mode 100644
+index 0000000..ba7eac6
+--- /dev/null
++++ b/event-contracts/src/main/java/io/github/tmejs/reservation/events/OrderLine.java
+@@ -0,0 +1,5 @@
++package io.github.tmejs.reservation.events;
++
++import java.util.UUID;
++
++public record OrderLine(UUID productId, int quantity) {}
+diff --git a/event-contracts/src/main/java/io/github/tmejs/reservation/events/StockRejected.java b/event-contracts/src/main/java/io/github/tmejs/reservation/events/StockRejected.java
+new file mode 100644
+index 0000000..60fb67c
+--- /dev/null
++++ b/event-contracts/src/main/java/io/github/tmejs/reservation/events/StockRejected.java
+@@ -0,0 +1,5 @@
++package io.github.tmejs.reservation.events;
++
++import java.util.UUID;
++
++public record StockRejected(EventMetadata metadata, UUID causationId, String reason) {}
+diff --git a/event-contracts/src/main/java/io/github/tmejs/reservation/events/StockReserved.java b/event-contracts/src/main/java/io/github/tmejs/reservation/events/StockReserved.java
+new file mode 100644
+index 0000000..798866b
+--- /dev/null
++++ b/event-contracts/src/main/java/io/github/tmejs/reservation/events/StockReserved.java
+@@ -0,0 +1,5 @@
++package io.github.tmejs.reservation.events;
++
++import java.util.UUID;
++
++public record StockReserved(EventMetadata metadata, UUID causationId) {}
+diff --git a/event-contracts/src/test/java/io/github/tmejs/reservation/events/EventCodecTest.java b/event-contracts/src/test/java/io/github/tmejs/reservation/events/EventCodecTest.java
+new file mode 100644
+index 0000000..9154bd6
+--- /dev/null
++++ b/event-contracts/src/test/java/io/github/tmejs/reservation/events/EventCodecTest.java
+@@ -0,0 +1,73 @@
++package io.github.tmejs.reservation.events;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++
++import java.time.Instant;
++import java.util.List;
++import java.util.UUID;
++import org.junit.jupiter.api.Test;
++import tools.jackson.databind.ObjectMapper;
++
++class EventCodecTest {
++
++    private static final UUID EVENT_ID = UUID.fromString("00000000-0000-4000-8000-000000000001");
++    private static final UUID ORDER_ID = UUID.fromString("00000000-0000-4000-8000-000000000002");
++    private static final UUID PRODUCT_ID = UUID.fromString("00000000-0000-4000-8000-000000000003");
++    private static final UUID CAUSATION_ID = UUID.fromString("00000000-0000-4000-8000-000000000004");
++    private static final Instant OCCURRED_AT = Instant.parse("2026-09-26T10:15:30Z");
++
++    private final EventCodec codec = new EventCodec();
++
++    @Test
++    void roundTripsEveryV1EventWithoutJavaTypeMetadata() {
++        var created = new OrderCreated(
++                metadata("OrderCreated"), List.of(new OrderLine(PRODUCT_ID, 3)));
++        var reserved = new StockReserved(metadata("StockReserved"), CAUSATION_ID);
++        var rejected = new StockRejected(metadata("StockRejected"), CAUSATION_ID, "INSUFFICIENT_STOCK");
++
++        String createdJson = codec.encode(created);
++        String reservedJson = codec.encode(reserved);
++        String rejectedJson = codec.encode(rejected);
++
++        assertThat(codec.decodeOrderCreated(createdJson)).isEqualTo(created);
++        assertThat(codec.decodeStockReserved(reservedJson)).isEqualTo(reserved);
++        assertThat(codec.decodeStockRejected(rejectedJson)).isEqualTo(rejected);
++        assertThat(createdJson).contains("\"eventType\":\"OrderCreated\"", "\"schemaVersion\":1");
++        assertThat(createdJson).doesNotContain("@class", "java.", "io.github.tmejs");
++    }
++
++    @Test
++    void rejectsMalformedJson() {
++        assertThatThrownBy(() -> codec.decodeOrderCreated("{not-json"))
++                .isInstanceOf(IllegalArgumentException.class)
++                .hasMessageContaining("Malformed event JSON");
++    }
++
++    @Test
++    void rejectsWrongEventType() throws Exception {
++        var json = new ObjectMapper().writeValueAsString(
++                new OrderCreated(metadata("StockReserved"), List.of(new OrderLine(PRODUCT_ID, 3))));
++
++        assertThatThrownBy(() -> codec.decodeOrderCreated(json))
++                .isInstanceOf(IllegalArgumentException.class)
++                .hasMessageContaining("event type")
++                .hasMessageContaining("OrderCreated");
++    }
++
++    @Test
++    void rejectsUnsupportedSchemaVersion() throws Exception {
++        var unsupported = new EventMetadata(EVENT_ID, "OrderCreated", 2, OCCURRED_AT, ORDER_ID);
++        var json = new ObjectMapper().writeValueAsString(
++                new OrderCreated(unsupported, List.of(new OrderLine(PRODUCT_ID, 3))));
++
++        assertThatThrownBy(() -> codec.decodeOrderCreated(json))
++                .isInstanceOf(IllegalArgumentException.class)
++                .hasMessageContaining("schema version")
++                .hasMessageContaining("2");
++    }
++
++    private static EventMetadata metadata(String eventType) {
++        return new EventMetadata(EVENT_ID, eventType, 1, OCCURRED_AT, ORDER_ID);
++    }
++}
+diff --git a/order-service/pom.xml b/order-service/pom.xml
+index d0ce567..d9fccfe 100644
+--- a/order-service/pom.xml
++++ b/order-service/pom.xml
+@@ -11,20 +11,25 @@
+     </parent>
+ 
+     <artifactId>order-service</artifactId>
+ 
+     <dependencies>
+         <dependency>
+             <groupId>${project.groupId}</groupId>
+             <artifactId>api-contracts</artifactId>
+             <version>${project.version}</version>
+         </dependency>
++        <dependency>
++            <groupId>${project.groupId}</groupId>
++            <artifactId>event-contracts</artifactId>
++            <version>${project.version}</version>
++        </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-webmvc</artifactId>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-validation</artifactId>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+@@ -73,20 +78,26 @@
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-webmvc-test</artifactId>
+             <scope>test</scope>
+         </dependency>
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-security-oauth2-resource-server-test</artifactId>
+             <scope>test</scope>
+         </dependency>
++        <dependency>
++            <groupId>${project.groupId}</groupId>
++            <artifactId>api-clients</artifactId>
++            <version>${project.version}</version>
++            <scope>test</scope>
++        </dependency>
+         <dependency>
+             <groupId>org.testcontainers</groupId>
+             <artifactId>testcontainers</artifactId>
+             <scope>test</scope>
+         </dependency>
+         <dependency>
+             <groupId>org.testcontainers</groupId>
+             <artifactId>testcontainers-postgresql</artifactId>
+             <scope>test</scope>
+         </dependency>
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/config/OrderConfiguration.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/config/OrderConfiguration.java
+new file mode 100644
+index 0000000..5d0976c
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/config/OrderConfiguration.java
+@@ -0,0 +1,21 @@
++package io.github.tmejs.reservation.orders.config;
++
++import io.github.tmejs.reservation.events.EventCodec;
++import java.time.Clock;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Configuration;
++import tools.jackson.databind.ObjectMapper;
++
++@Configuration(proxyBeanMethods = false)
++public class OrderConfiguration {
++
++    @Bean
++    Clock systemClock() {
++        return Clock.systemUTC();
++    }
++
++    @Bean
++    EventCodec eventCodec(ObjectMapper objectMapper) {
++        return new EventCodec(objectMapper);
++    }
++}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/idempotency/IdempotencyRepository.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/idempotency/IdempotencyRepository.java
+new file mode 100644
+index 0000000..81890fb
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/idempotency/IdempotencyRepository.java
+@@ -0,0 +1,60 @@
++package io.github.tmejs.reservation.orders.idempotency;
++
++import java.sql.Timestamp;
++import java.time.Instant;
++import java.util.Optional;
++import java.util.UUID;
++import org.springframework.jdbc.core.JdbcTemplate;
++import org.springframework.stereotype.Repository;
++
++@Repository
++public class IdempotencyRepository {
++
++    private final JdbcTemplate jdbc;
++
++    IdempotencyRepository(JdbcTemplate jdbc) {
++        this.jdbc = jdbc;
++    }
++
++    public boolean tryClaim(String ownerSubject, String key, String fingerprint, Instant createdAt) {
++        return jdbc.update(
++                        "insert into idempotency_keys"
++                                + "(owner_subject, idempotency_key, request_fingerprint, created_at) "
++                                + "values (?, ?, ?, ?) on conflict (owner_subject, idempotency_key) do nothing",
++                        ownerSubject,
++                        key,
++                        fingerprint,
++                        Timestamp.from(createdAt))
++                == 1;
++    }
++
++    public Optional<StoredResponse> find(String ownerSubject, String key) {
++        return jdbc.query(
++                        "select request_fingerprint, response_payload, response_location "
++                                + "from idempotency_keys where owner_subject = ? and idempotency_key = ?",
++                        (resultSet, rowNumber) -> new StoredResponse(
++                                resultSet.getString("request_fingerprint"),
++                                resultSet.getString("response_payload"),
++                                resultSet.getString("response_location")),
++                        ownerSubject,
++                        key)
++                .stream()
++                .findFirst();
++    }
++
++    public void complete(String ownerSubject, String key, UUID orderId, String responsePayload, String location) {
++        int changed = jdbc.update(
++                "update idempotency_keys set order_id = ?, response_payload = ?, response_location = ? "
++                        + "where owner_subject = ? and idempotency_key = ? and order_id is null",
++                orderId,
++                responsePayload,
++                location,
++                ownerSubject,
++                key);
++        if (changed != 1) {
++            throw new IllegalStateException("Idempotency claim was not completed exactly once");
++        }
++    }
++
++    public record StoredResponse(String fingerprint, String payload, String location) {}
++}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/OutboxEntity.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/OutboxEntity.java
+index 0ef574c..67ecdae 100644
+--- a/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/OutboxEntity.java
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/OutboxEntity.java
+@@ -38,11 +38,30 @@ public class OutboxEntity {
+     @Column(name = "attempt_count", nullable = false)
+     private int attemptCount;
+ 
+     @Column(name = "published_at")
+     private Instant publishedAt;
+ 
+     @Column(name = "last_error", columnDefinition = "text")
+     private String lastError;
+ 
+     protected OutboxEntity() {}
++
++    public OutboxEntity(
++            UUID id,
++            UUID eventId,
++            UUID orderId,
++            String eventType,
++            String topic,
++            String payload,
++            Instant createdAt) {
++        this.id = id;
++        this.eventId = eventId;
++        this.orderId = orderId;
++        this.eventType = eventType;
++        this.topic = topic;
++        this.payload = payload;
++        this.createdAt = createdAt;
++        this.nextAttemptAt = createdAt;
++        this.attemptCount = 0;
++    }
+ }
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/OutboxRepository.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/OutboxRepository.java
+new file mode 100644
+index 0000000..299292a
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/messaging/OutboxRepository.java
+@@ -0,0 +1,6 @@
++package io.github.tmejs.reservation.orders.messaging;
++
++import java.util.UUID;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++public interface OutboxRepository extends JpaRepository<OutboxEntity, UUID> {}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderEntity.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderEntity.java
+index 8f03621..5ab787a 100644
+--- a/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderEntity.java
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderEntity.java
+@@ -1,17 +1,23 @@
+ package io.github.tmejs.reservation.orders.order;
+ 
+ import jakarta.persistence.Column;
++import jakarta.persistence.CascadeType;
+ import jakarta.persistence.Entity;
+ import jakarta.persistence.Id;
++import jakarta.persistence.OneToMany;
++import jakarta.persistence.OrderBy;
+ import jakarta.persistence.Table;
+ import java.time.Instant;
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.List;
+ import java.util.UUID;
+ 
+ @Entity
+ @Table(name = "orders")
+ public class OrderEntity {
+ 
+     @Id
+     private UUID id;
+ 
+     @Column(name = "owner_subject", nullable = false, length = 255)
+@@ -22,12 +28,44 @@ public class OrderEntity {
+ 
+     @Column(name = "rejection_reason", length = 64)
+     private String rejectionReason;
+ 
+     @Column(name = "created_at", nullable = false)
+     private Instant createdAt;
+ 
+     @Column(name = "updated_at", nullable = false)
+     private Instant updatedAt;
+ 
++    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
++    @OrderBy("productId ASC")
++    private List<OrderItemEntity> items = new ArrayList<>();
++
+     protected OrderEntity() {}
++
++    OrderEntity(UUID id, String ownerSubject, Instant createdAt) {
++        this.id = id;
++        this.ownerSubject = ownerSubject;
++        this.status = "PENDING";
++        this.createdAt = createdAt;
++        this.updatedAt = createdAt;
++    }
++
++    void addItem(UUID itemId, UUID productId, int quantity) {
++        items.add(new OrderItemEntity(itemId, this, productId, quantity));
++    }
++
++    UUID getId() {
++        return id;
++    }
++
++    String getStatus() {
++        return status;
++    }
++
++    String getRejectionReason() {
++        return rejectionReason;
++    }
++
++    List<OrderItemEntity> getItems() {
++        return Collections.unmodifiableList(items);
++    }
+ }
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderItemEntity.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderItemEntity.java
+index 6e437c9..f43d7e4 100644
+--- a/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderItemEntity.java
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderItemEntity.java
+@@ -20,11 +20,26 @@ public class OrderItemEntity {
+     @JoinColumn(name = "order_id", nullable = false)
+     private OrderEntity order;
+ 
+     @Column(name = "product_id", nullable = false)
+     private UUID productId;
+ 
+     @Column(nullable = false)
+     private int quantity;
+ 
+     protected OrderItemEntity() {}
++
++    OrderItemEntity(UUID id, OrderEntity order, UUID productId, int quantity) {
++        this.id = id;
++        this.order = order;
++        this.productId = productId;
++        this.quantity = quantity;
++    }
++
++    UUID getProductId() {
++        return productId;
++    }
++
++    int getQuantity() {
++        return quantity;
++    }
+ }
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderProblemHandler.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderProblemHandler.java
+new file mode 100644
+index 0000000..be21d56
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderProblemHandler.java
+@@ -0,0 +1,92 @@
++package io.github.tmejs.reservation.orders.order;
++
++import io.github.tmejs.reservation.orders.order.OrderService.IdempotencyConflictException;
++import io.github.tmejs.reservation.orders.order.OrderService.InvalidOrderRequestException;
++import io.github.tmejs.reservation.orders.order.OrderService.OrderNotFoundException;
++import jakarta.servlet.http.HttpServletRequest;
++import jakarta.validation.ConstraintViolation;
++import jakarta.validation.ConstraintViolationException;
++import java.net.URI;
++import java.util.List;
++import java.util.Map;
++import org.springframework.http.HttpStatus;
++import org.springframework.http.ProblemDetail;
++import org.springframework.http.ResponseEntity;
++import org.springframework.http.converter.HttpMessageNotReadableException;
++import org.springframework.web.bind.MethodArgumentNotValidException;
++import org.springframework.web.bind.annotation.ExceptionHandler;
++import org.springframework.web.bind.annotation.RestControllerAdvice;
++import org.springframework.web.method.annotation.HandlerMethodValidationException;
++
++@RestControllerAdvice
++final class OrderProblemHandler {
++
++    @ExceptionHandler(OrderNotFoundException.class)
++    ResponseEntity<ProblemDetail> notFound(OrderNotFoundException exception, HttpServletRequest request) {
++        return problem(HttpStatus.NOT_FOUND, "Order not found", exception.getMessage(), request, List.of());
++    }
++
++    @ExceptionHandler(IdempotencyConflictException.class)
++    ResponseEntity<ProblemDetail> conflict(IdempotencyConflictException exception, HttpServletRequest request) {
++        return problem(HttpStatus.CONFLICT, "Idempotency conflict", exception.getMessage(), request, List.of());
++    }
++
++    @ExceptionHandler(InvalidOrderRequestException.class)
++    ResponseEntity<ProblemDetail> invalidOrder(InvalidOrderRequestException exception, HttpServletRequest request) {
++        return problem(HttpStatus.BAD_REQUEST, "Invalid request", exception.getMessage(), request, List.of());
++    }
++
++    @ExceptionHandler(MethodArgumentNotValidException.class)
++    ResponseEntity<ProblemDetail> invalidBody(MethodArgumentNotValidException exception, HttpServletRequest request) {
++        List<Map<String, String>> errors = exception.getBindingResult().getFieldErrors().stream()
++                .map(error -> Map.of("field", error.getField(), "message", error.getDefaultMessage()))
++                .toList();
++        return problem(HttpStatus.BAD_REQUEST, "Invalid request", "Request validation failed", request, errors);
++    }
++
++    @ExceptionHandler(HandlerMethodValidationException.class)
++    ResponseEntity<ProblemDetail> invalidParameters(
++            HandlerMethodValidationException exception, HttpServletRequest request) {
++        List<Map<String, String>> errors = exception.getParameterValidationResults().stream()
++                .flatMap(result -> result.getResolvableErrors().stream()
++                        .map(error -> Map.of(
++                                "field", result.getMethodParameter().getParameterName(),
++                                "message", error.getDefaultMessage())))
++                .toList();
++        return problem(HttpStatus.BAD_REQUEST, "Invalid request", "Request validation failed", request, errors);
++    }
++
++    @ExceptionHandler(ConstraintViolationException.class)
++    ResponseEntity<ProblemDetail> constraintViolation(
++            ConstraintViolationException exception, HttpServletRequest request) {
++        List<Map<String, String>> errors = exception.getConstraintViolations().stream()
++                .map(OrderProblemHandler::toFieldError)
++                .toList();
++        return problem(HttpStatus.BAD_REQUEST, "Invalid request", "Request validation failed", request, errors);
++    }
++
++    @ExceptionHandler(HttpMessageNotReadableException.class)
++    ResponseEntity<ProblemDetail> unreadableBody(HttpMessageNotReadableException exception, HttpServletRequest request) {
++        return problem(HttpStatus.BAD_REQUEST, "Invalid request", "Request body could not be read", request, List.of());
++    }
++
++    private static Map<String, String> toFieldError(ConstraintViolation<?> violation) {
++        return Map.of("field", violation.getPropertyPath().toString(), "message", violation.getMessage());
++    }
++
++    private static ResponseEntity<ProblemDetail> problem(
++            HttpStatus status,
++            String title,
++            String detail,
++            HttpServletRequest request,
++            List<Map<String, String>> errors) {
++        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
++        problem.setTitle(title);
++        problem.setType(URI.create("about:blank"));
++        problem.setInstance(URI.create(request.getRequestURI()));
++        if (!errors.isEmpty()) {
++            problem.setProperty("errors", errors);
++        }
++        return ResponseEntity.status(status).body(problem);
++    }
++}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderRepository.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderRepository.java
+new file mode 100644
+index 0000000..e045a67
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderRepository.java
+@@ -0,0 +1,12 @@
++package io.github.tmejs.reservation.orders.order;
++
++import java.util.Optional;
++import java.util.UUID;
++import org.springframework.data.jpa.repository.EntityGraph;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++public interface OrderRepository extends JpaRepository<OrderEntity, UUID> {
++
++    @EntityGraph(attributePaths = "items")
++    Optional<OrderEntity> findByIdAndOwnerSubject(UUID id, String ownerSubject);
++}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderService.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderService.java
+new file mode 100644
+index 0000000..4362470
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrderService.java
+@@ -0,0 +1,196 @@
++package io.github.tmejs.reservation.orders.order;
++
++import io.github.tmejs.reservation.events.EventCodec;
++import io.github.tmejs.reservation.events.EventMetadata;
++import io.github.tmejs.reservation.events.OrderCreated;
++import io.github.tmejs.reservation.events.OrderLine;
++import io.github.tmejs.reservation.orders.idempotency.IdempotencyRepository;
++import io.github.tmejs.reservation.orders.messaging.OutboxEntity;
++import io.github.tmejs.reservation.orders.messaging.OutboxRepository;
++import java.nio.charset.StandardCharsets;
++import java.security.MessageDigest;
++import java.security.NoSuchAlgorithmException;
++import java.time.Clock;
++import java.time.Instant;
++import java.util.Comparator;
++import java.util.HashSet;
++import java.util.HexFormat;
++import java.util.List;
++import java.util.UUID;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++import tools.jackson.core.JacksonException;
++import tools.jackson.databind.ObjectMapper;
++
++@Service
++public class OrderService {
++
++    private static final String OUTBOX_TOPIC = "orders.v1";
++
++    private final OrderRepository orders;
++    private final IdempotencyRepository idempotency;
++    private final OutboxRepository outbox;
++    private final EventCodec eventCodec;
++    private final ObjectMapper objectMapper;
++    private final Clock clock;
++
++    OrderService(
++            OrderRepository orders,
++            IdempotencyRepository idempotency,
++            OutboxRepository outbox,
++            EventCodec eventCodec,
++            ObjectMapper objectMapper,
++            Clock clock) {
++        this.orders = orders;
++        this.idempotency = idempotency;
++        this.outbox = outbox;
++        this.eventCodec = eventCodec;
++        this.objectMapper = objectMapper;
++        this.clock = clock;
++    }
++
++    @Transactional
++    public CreationResult create(String ownerSubject, String idempotencyKey, CreateOrderCommand command) {
++        List<Line> canonicalItems = validateAndCanonicalize(command);
++        String fingerprint = fingerprint(canonicalItems);
++        Instant createdAt = clock.instant();
++
++        if (!idempotency.tryClaim(ownerSubject, idempotencyKey, fingerprint, createdAt)) {
++            var stored = idempotency.find(ownerSubject, idempotencyKey)
++                    .orElseThrow(() -> new IllegalStateException("Conflicting idempotency claim disappeared"));
++            if (!fingerprint.equals(stored.fingerprint())) {
++                throw new IdempotencyConflictException();
++            }
++            if (stored.payload() == null || stored.location() == null) {
++                throw new IllegalStateException("Completed idempotency response is missing");
++            }
++            return new CreationResult(decodeResponse(stored.payload()), stored.location());
++        }
++
++        UUID orderId = UUID.randomUUID();
++        UUID eventId = UUID.randomUUID();
++        var entity = new OrderEntity(orderId, ownerSubject, createdAt);
++        canonicalItems.forEach(line -> entity.addItem(UUID.randomUUID(), line.productId(), line.quantity()));
++        orders.saveAndFlush(entity);
++
++        var event = new OrderCreated(
++                new EventMetadata(
++                        eventId,
++                        EventCodec.ORDER_CREATED,
++                        EventCodec.SCHEMA_VERSION,
++                        createdAt,
++                        orderId),
++                canonicalItems.stream()
++                        .map(line -> new OrderLine(line.productId(), line.quantity()))
++                        .toList());
++        outbox.save(new OutboxEntity(
++                UUID.randomUUID(),
++                eventId,
++                orderId,
++                EventCodec.ORDER_CREATED,
++                OUTBOX_TOPIC,
++                eventCodec.encode(event),
++                createdAt));
++
++        var response = new OrderView(orderId, canonicalItems, "PENDING", null);
++        String location = "/orders/" + orderId;
++        idempotency.complete(ownerSubject, idempotencyKey, orderId, encodeResponse(response), location);
++        return new CreationResult(response, location);
++    }
++
++    @Transactional(readOnly = true)
++    public OrderView get(String ownerSubject, UUID orderId) {
++        OrderEntity order = orders.findByIdAndOwnerSubject(orderId, ownerSubject)
++                .orElseThrow(OrderNotFoundException::new);
++        List<Line> items = order.getItems().stream()
++                .map(item -> new Line(item.getProductId(), item.getQuantity()))
++                .toList();
++        return new OrderView(order.getId(), items, order.getStatus(), order.getRejectionReason());
++    }
++
++    private static List<Line> validateAndCanonicalize(CreateOrderCommand command) {
++        if (command == null || command.items() == null || command.items().isEmpty()) {
++            throw new InvalidOrderRequestException("At least one item is required");
++        }
++        var productIds = new HashSet<UUID>();
++        for (Line item : command.items()) {
++            if (item == null || item.productId() == null || item.quantity() < 1) {
++                throw new InvalidOrderRequestException("Every item requires a product and positive quantity");
++            }
++            if (!productIds.add(item.productId())) {
++                throw new InvalidOrderRequestException("Product identifiers must be distinct");
++            }
++        }
++        return command.items().stream()
++                .sorted(Comparator.comparing(line -> line.productId().toString()))
++                .toList();
++    }
++
++    /**
++     * Stable SHA-256 over UTF-8 lines formatted as lowercase UUID, colon, decimal quantity, newline,
++     * after sorting by the UUID string.
++     */
++    private static String fingerprint(List<Line> items) {
++        var canonical = new StringBuilder();
++        items.forEach(item -> canonical.append(item.productId())
++                .append(':')
++                .append(item.quantity())
++                .append('\n'));
++        try {
++            return HexFormat.of().formatHex(
++                    MessageDigest.getInstance("SHA-256").digest(canonical.toString().getBytes(StandardCharsets.UTF_8)));
++        } catch (NoSuchAlgorithmException exception) {
++            throw new IllegalStateException("SHA-256 is unavailable", exception);
++        }
++    }
++
++    private String encodeResponse(OrderView response) {
++        try {
++            return objectMapper.writeValueAsString(response);
++        } catch (JacksonException exception) {
++            throw new IllegalStateException("Order response cannot be serialized", exception);
++        }
++    }
++
++    private OrderView decodeResponse(String payload) {
++        try {
++            return objectMapper.readValue(payload, OrderView.class);
++        } catch (JacksonException exception) {
++            throw new IllegalStateException("Stored order response cannot be deserialized", exception);
++        }
++    }
++
++    public record CreateOrderCommand(List<Line> items) {
++        public CreateOrderCommand {
++            items = items == null ? null : List.copyOf(items);
++        }
++    }
++
++    public record Line(UUID productId, int quantity) {}
++
++    public record OrderView(UUID id, List<Line> items, String status, String rejectionReason) {
++        public OrderView {
++            items = items == null ? null : List.copyOf(items);
++        }
++    }
++
++    public record CreationResult(OrderView response, String location) {}
++
++    public static final class InvalidOrderRequestException extends RuntimeException {
++        InvalidOrderRequestException(String message) {
++            super(message);
++        }
++    }
++
++    public static final class IdempotencyConflictException extends RuntimeException {
++        IdempotencyConflictException() {
++            super("The idempotency key was already used with a different request");
++        }
++    }
++
++    public static final class OrderNotFoundException extends RuntimeException {
++        OrderNotFoundException() {
++            super("Order not found");
++        }
++    }
++}
+diff --git a/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrdersController.java b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrdersController.java
+new file mode 100644
+index 0000000..0f43c3b
+--- /dev/null
++++ b/order-service/src/main/java/io/github/tmejs/reservation/orders/order/OrdersController.java
+@@ -0,0 +1,55 @@
++package io.github.tmejs.reservation.orders.order;
++
++import io.github.tmejs.reservation.api.orders.OrdersApi;
++import io.github.tmejs.reservation.api.orders.model.CreateOrderRequest;
++import io.github.tmejs.reservation.api.orders.model.Order;
++import io.github.tmejs.reservation.api.orders.model.OrderItem;
++import io.github.tmejs.reservation.api.orders.model.OrderStatus;
++import io.github.tmejs.reservation.api.orders.model.RejectionReason;
++import io.github.tmejs.reservation.orders.order.OrderService.CreateOrderCommand;
++import io.github.tmejs.reservation.orders.order.OrderService.Line;
++import io.github.tmejs.reservation.orders.order.OrderService.OrderView;
++import io.github.tmejs.reservation.orders.security.CurrentOwner;
++import java.net.URI;
++import java.util.LinkedHashSet;
++import java.util.UUID;
++import org.springframework.http.ResponseEntity;
++import org.springframework.web.bind.annotation.RestController;
++
++@RestController
++public class OrdersController implements OrdersApi {
++
++    private final OrderService orderService;
++    private final CurrentOwner currentOwner;
++
++    OrdersController(OrderService orderService, CurrentOwner currentOwner) {
++        this.orderService = orderService;
++        this.currentOwner = currentOwner;
++    }
++
++    @Override
++    public ResponseEntity<Order> createOrder(String idempotencyKey, CreateOrderRequest request) {
++        var command = new CreateOrderCommand(request.getItems().stream()
++                .map(item -> new Line(item.getProductId(), item.getQuantity()))
++                .toList());
++        var result = orderService.create(currentOwner.subject(), idempotencyKey, command);
++        return ResponseEntity.accepted()
++                .location(URI.create(result.location()))
++                .body(toApi(result.response()));
++    }
++
++    @Override
++    public ResponseEntity<Order> getOrder(UUID id) {
++        return ResponseEntity.ok(toApi(orderService.get(currentOwner.subject(), id)));
++    }
++
++    private static Order toApi(OrderView view) {
++        var items = new LinkedHashSet<OrderItem>();
++        view.items().forEach(line -> items.add(new OrderItem(line.productId(), line.quantity())));
++        var response = new Order(view.id(), items, OrderStatus.fromValue(view.status()));
++        if (view.rejectionReason() != null) {
++            response.setRejectionReason(RejectionReason.fromValue(view.rejectionReason()));
++        }
++        return response;
++    }
++}
+diff --git a/order-service/src/test/java/io/github/tmejs/reservation/orders/order/OrderCreationIT.java b/order-service/src/test/java/io/github/tmejs/reservation/orders/order/OrderCreationIT.java
+new file mode 100644
+index 0000000..362c60f
+--- /dev/null
++++ b/order-service/src/test/java/io/github/tmejs/reservation/orders/order/OrderCreationIT.java
+@@ -0,0 +1,288 @@
++package io.github.tmejs.reservation.orders.order;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++
++import com.nimbusds.jose.jwk.JWKSet;
++import com.nimbusds.jose.jwk.RSAKey;
++import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
++import com.nimbusds.jose.proc.SecurityContext;
++import com.sun.net.httpserver.HttpServer;
++import io.github.tmejs.reservation.client.orders.ApiClient;
++import io.github.tmejs.reservation.client.orders.ApiException;
++import io.github.tmejs.reservation.client.orders.ApiResponse;
++import io.github.tmejs.reservation.client.orders.api.OrdersApi;
++import io.github.tmejs.reservation.client.orders.model.CreateOrderRequest;
++import io.github.tmejs.reservation.client.orders.model.Order;
++import io.github.tmejs.reservation.client.orders.model.OrderItem;
++import io.github.tmejs.reservation.client.orders.model.OrderStatus;
++import io.github.tmejs.reservation.client.orders.model.RejectionReason;
++import io.github.tmejs.reservation.events.EventCodec;
++import io.github.tmejs.reservation.orders.OrderApplication;
++import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
++import java.io.IOException;
++import java.net.InetAddress;
++import java.net.InetSocketAddress;
++import java.nio.charset.StandardCharsets;
++import java.security.KeyPair;
++import java.security.KeyPairGenerator;
++import java.security.interfaces.RSAPrivateKey;
++import java.security.interfaces.RSAPublicKey;
++import java.time.Clock;
++import java.time.Instant;
++import java.time.ZoneOffset;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Map;
++import java.util.UUID;
++import java.util.concurrent.CountDownLatch;
++import java.util.concurrent.Executors;
++import java.util.concurrent.TimeUnit;
++import org.junit.jupiter.api.AfterAll;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.context.SpringBootTest;
++import org.springframework.boot.test.context.TestConfiguration;
++import org.springframework.boot.test.web.server.LocalServerPort;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Import;
++import org.springframework.context.annotation.Primary;
++import org.springframework.jdbc.core.JdbcTemplate;
++import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
++import org.springframework.security.oauth2.jwt.JwtClaimsSet;
++import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
++import org.springframework.security.oauth2.jwt.JwsHeader;
++import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
++import org.springframework.test.context.DynamicPropertyRegistry;
++import org.springframework.test.context.DynamicPropertySource;
++
++@SpringBootTest(classes = OrderApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
++@Import(OrderCreationIT.FixedClockConfiguration.class)
++class OrderCreationIT extends OrderPostgresIntegrationTest {
++
++    private static final String ISSUER = "https://issuer.example/realms/reservation";
++    private static final String KEY_ID = "order-api-test-key";
++    private static final KeyPair SIGNING_KEY = generateKeyPair();
++    private static final HttpServer JWKS_SERVER = startJwksServer();
++    private static final Instant FIXED_TIME = Instant.parse("2026-09-26T07:00:00Z");
++
++    @LocalServerPort
++    private int port;
++
++    @Autowired
++    private JdbcTemplate jdbc;
++
++    @BeforeEach
++    void clearOrders() {
++        jdbc.execute("truncate table order_items, idempotency_keys, outbox, processed_events, orders cascade");
++    }
++
++    @AfterAll
++    static void stopJwksServer() {
++        JWKS_SERVER.stop(0);
++    }
++
++    @DynamicPropertySource
++    static void jwtProperties(DynamicPropertyRegistry registry) {
++        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> ISSUER);
++        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", () ->
++                "http://" + JWKS_SERVER.getAddress().getHostString() + ":"
++                        + JWKS_SERVER.getAddress().getPort() + "/jwks");
++    }
++
++    @Test
++    void createsAtomicallyAndReplaysOriginalResponseForCanonicalRequest() throws Exception {
++        UUID firstProduct = UUID.fromString("00000000-0000-4000-8000-000000000002");
++        UUID secondProduct = UUID.fromString("00000000-0000-4000-8000-000000000001");
++        var firstRequest = request(item(firstProduct, 2), item(secondProduct, 1));
++        var reorderedRequest = request(item(secondProduct, 1), item(firstProduct, 2));
++        OrdersApi alice = api("alice-subject");
++
++        ApiResponse<Order> first = alice.createOrderWithHttpInfo("replay-key", firstRequest);
++        jdbc.update(
++                "update orders set status = 'REJECTED', rejection_reason = 'INSUFFICIENT_STOCK' where id = ?",
++                first.getData().getId());
++        ApiResponse<Order> replay = alice.createOrderWithHttpInfo("replay-key", reorderedRequest);
++
++        assertThat(first.getStatusCode()).isEqualTo(202);
++        assertThat(replay.getStatusCode()).isEqualTo(202);
++        assertThat(replay.getData()).isEqualTo(first.getData());
++        assertThat(replay.getData().getId()).isEqualTo(first.getData().getId());
++        assertThat(replay.getData().getStatus()).isEqualTo(OrderStatus.PENDING);
++        assertThat(replay.getHeaders().get("location")).isEqualTo(first.getHeaders().get("location"));
++        assertThat(jdbc.queryForObject("select count(*) from orders", Integer.class)).isEqualTo(1);
++        assertThat(jdbc.queryForObject("select count(*) from order_items", Integer.class)).isEqualTo(2);
++        assertThat(jdbc.queryForObject("select count(*) from outbox where published_at is null", Integer.class))
++                .isEqualTo(1);
++
++        String payload = jdbc.queryForObject("select payload from outbox", String.class);
++        var event = new EventCodec().decodeOrderCreated(payload);
++        assertThat(event.metadata().orderId()).isEqualTo(first.getData().getId());
++        assertThat(event.metadata().occurredAt()).isEqualTo(FIXED_TIME);
++        assertThat(event.items()).extracting(line -> line.productId().toString())
++                .containsExactly(secondProduct.toString(), firstProduct.toString());
++
++        Order current = alice.getOrder(first.getData().getId());
++        assertThat(current.getStatus()).isEqualTo(OrderStatus.REJECTED);
++        assertThat(current.getRejectionReason()).isEqualTo(RejectionReason.INSUFFICIENT_STOCK);
++        assertApiStatus(() -> api("bob-subject").getOrder(first.getData().getId()), 404);
++    }
++
++    @Test
++    void rejectsChangedPayloadForSameOwnerAndKey() throws Exception {
++        OrdersApi alice = api("alice-subject");
++        UUID productId = UUID.randomUUID();
++        alice.createOrder("conflict-key", request(item(productId, 1)));
++
++        assertApiStatus(() -> alice.createOrder("conflict-key", request(item(productId, 2))), 409);
++        assertThat(jdbc.queryForObject("select count(*) from orders", Integer.class)).isEqualTo(1);
++        assertThat(jdbc.queryForObject("select count(*) from outbox", Integer.class)).isEqualTo(1);
++    }
++
++    @Test
++    void serializesConcurrentSameKeyRequestsIntoOneOrderAndOneOutboxEntry() throws Exception {
++        UUID productId = UUID.randomUUID();
++        var ready = new CountDownLatch(2);
++        var start = new CountDownLatch(1);
++
++        try (var executor = Executors.newFixedThreadPool(2)) {
++            var first = executor.submit(() -> createAfterBarrier("alice-subject", productId, ready, start));
++            var second = executor.submit(() -> createAfterBarrier("alice-subject", productId, ready, start));
++            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
++            start.countDown();
++
++            assertThat(first.get(10, TimeUnit.SECONDS).getId())
++                    .isEqualTo(second.get(10, TimeUnit.SECONDS).getId());
++        }
++
++        assertThat(jdbc.queryForObject("select count(*) from orders", Integer.class)).isEqualTo(1);
++        assertThat(jdbc.queryForObject("select count(*) from outbox where published_at is null", Integer.class))
++                .isEqualTo(1);
++        assertThat(jdbc.queryForObject("select count(*) from idempotency_keys", Integer.class)).isEqualTo(1);
++    }
++
++    @Test
++    void scopesTheSameIdempotencyKeyToEachOwner() throws Exception {
++        UUID productId = UUID.randomUUID();
++
++        Order aliceOrder = api("alice-subject").createOrder("shared-key", request(item(productId, 1)));
++        Order bobOrder = api("bob-subject").createOrder("shared-key", request(item(productId, 1)));
++
++        assertThat(aliceOrder.getId()).isNotEqualTo(bobOrder.getId());
++        assertThat(jdbc.queryForObject("select count(*) from orders", Integer.class)).isEqualTo(2);
++        assertThat(jdbc.queryForObject("select count(*) from idempotency_keys", Integer.class)).isEqualTo(2);
++        assertThat(api("alice-subject").getOrder(aliceOrder.getId()).getId()).isEqualTo(aliceOrder.getId());
++        assertThat(api("bob-subject").getOrder(bobOrder.getId()).getId()).isEqualTo(bobOrder.getId());
++    }
++
++    @Test
++    void rejectsEmptyAndDuplicateProductItemsBeforePersistence() {
++        OrdersApi alice = api("alice-subject");
++        UUID duplicateProduct = UUID.randomUUID();
++
++        assertApiStatus(() -> alice.createOrder("empty", request()), 400);
++        assertApiStatus(() -> alice.createOrder(
++                        "duplicate", request(item(duplicateProduct, 1), item(duplicateProduct, 2))),
++                400);
++
++        assertThat(jdbc.queryForObject("select count(*) from orders", Integer.class)).isZero();
++        assertThat(jdbc.queryForObject("select count(*) from idempotency_keys", Integer.class)).isZero();
++        assertThat(jdbc.queryForObject("select count(*) from outbox", Integer.class)).isZero();
++    }
++
++    private Order createAfterBarrier(
++            String subject, UUID productId, CountDownLatch ready, CountDownLatch start) throws Exception {
++        ready.countDown();
++        assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
++        return api(subject).createOrder("concurrent-key", request(item(productId, 3)));
++    }
++
++    private OrdersApi api(String subject) {
++        String token = token(subject);
++        return new OrdersApi(new ApiClient()
++                .setScheme("http")
++                .setHost("localhost")
++                .setPort(port)
++                .setRequestInterceptor(request -> request.header("Authorization", "Bearer " + token)));
++    }
++
++    private static CreateOrderRequest request(OrderItem... items) {
++        return new CreateOrderRequest().items(new LinkedHashSet<>(List.of(items)));
++    }
++
++    private static OrderItem item(UUID productId, int quantity) {
++        return new OrderItem().productId(productId).quantity(quantity);
++    }
++
++    private static void assertApiStatus(ThrowingApiCall call, int expectedStatus) {
++        assertThatThrownBy(call::execute)
++                .isInstanceOfSatisfying(
++                        ApiException.class, exception -> assertThat(exception.getCode()).isEqualTo(expectedStatus));
++    }
++
++    private static String token(String subject) {
++        var rsaKey = new RSAKey.Builder((RSAPublicKey) SIGNING_KEY.getPublic())
++                .privateKey((RSAPrivateKey) SIGNING_KEY.getPrivate())
++                .keyID(KEY_ID)
++                .build();
++        var encoder = new NimbusJwtEncoder(new ImmutableJWKSet<SecurityContext>(new JWKSet(rsaKey)));
++        Instant now = Instant.now();
++        var claims = JwtClaimsSet.builder()
++                .issuer(ISSUER)
++                .subject(subject)
++                .audience(List.of("orders-api"))
++                .issuedAt(now.minusSeconds(5))
++                .notBefore(now.minusSeconds(5))
++                .expiresAt(now.plusSeconds(300))
++                .claim("scope", "orders-api")
++                .claim("realm_access", Map.of("roles", List.of("CUSTOMER")))
++                .build();
++        return encoder.encode(JwtEncoderParameters.from(
++                        JwsHeader.with(SignatureAlgorithm.RS256).keyId(KEY_ID).build(), claims))
++                .getTokenValue();
++    }
++
++    private static KeyPair generateKeyPair() {
++        try {
++            var generator = KeyPairGenerator.getInstance("RSA");
++            generator.initialize(2048);
++            return generator.generateKeyPair();
++        } catch (Exception exception) {
++            throw new IllegalStateException("Cannot generate JWT test key", exception);
++        }
++    }
++
++    private static HttpServer startJwksServer() {
++        try {
++            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
++            var publicKey = new RSAKey.Builder((RSAPublicKey) SIGNING_KEY.getPublic()).keyID(KEY_ID).build();
++            byte[] body = new JWKSet(publicKey).toString().getBytes(StandardCharsets.UTF_8);
++            server.createContext("/jwks", exchange -> {
++                exchange.getResponseHeaders().add("Content-Type", "application/json");
++                exchange.sendResponseHeaders(200, body.length);
++                exchange.getResponseBody().write(body);
++                exchange.close();
++            });
++            server.start();
++            return server;
++        } catch (IOException exception) {
++            throw new IllegalStateException("Cannot start JWKS test server", exception);
++        }
++    }
++
++    @FunctionalInterface
++    private interface ThrowingApiCall {
++        void execute() throws Exception;
++    }
++
++    @TestConfiguration(proxyBeanMethods = false)
++    static class FixedClockConfiguration {
++
++        @Bean
++        @Primary
++        Clock fixedClock() {
++            return Clock.fixed(FIXED_TIME, ZoneOffset.UTC);
++        }
++    }
++}

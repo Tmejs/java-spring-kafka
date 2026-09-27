@@ -48,3 +48,9 @@ clients accept bearer tokens. Protect metrics with a dedicated monitoring scope.
 Validate JWT signature, issuer, audience, and validity times. Include negative
 authentication/authorization tests and Alice/Bob isolation tests. Kafka carries no
 access tokens and stays internal to Compose; broker authentication/ACLs/TLS are v2.
+
+## Local verification instead of GitHub Actions
+
+The user requested removal of the GitHub Actions pipeline. Temurin Java 25.0.4 is
+installed through SDKMAN and local `./mvnw -B verify` is the required checkpoint
+gate. Record the command and result before each push.
