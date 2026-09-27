@@ -252,7 +252,7 @@ both services `messaging/OutboxPublisherIT.java`; Kafka configuration in applica
 **Interface:** `ReservationService.reserve(OrderCreated event)` returns void and
 commits the decision, stock changes, processed-event record, and result outbox.
 
-- [ ] Test multi-item success, unknown product, insufficient stock, no partial
+- [x] Test multi-item success, unknown product, insufficient stock, no partial
   reservation, identical duplicate event, different event ID for the same order,
   inconsistent repeated items, and competing orders:
   ```java
@@ -260,15 +260,15 @@ commits the decision, stock changes, processed-event record, and result outbox.
   assertThat(availableStock).isZero();
   assertThat(resultOutboxRows).isEqualTo(2); // one success and one rejection
   ```
-- [ ] Claim event/order with conflict-safe inserts and compare normalized item
+- [x] Claim event/order with conflict-safe inserts and compare normalized item
   fingerprints for repeated orders. Lock all existing product rows in sorted ID
   order; check every quantity before decrementing any stock.
-- [ ] Save a decision and one StockReserved/StockRejected outbox entry atomically.
+- [x] Save a decision and one StockReserved/StockRejected outbox entry atomically.
   Use bounded reasons UNKNOWN_PRODUCT and INSUFFICIENT_STOCK. Roll back all writes
   on technical failure. Duplicate deliveries do not create another result.
-- [ ] Listener delegates to the transactional service through a Spring proxy;
+- [x] Listener delegates to the transactional service through a Spring proxy;
   use record acknowledgement after successful return, never before DB commit.
-- [ ] Run concurrency/redelivery tests and `./mvnw verify`; commit/push:
+- [x] Run concurrency/redelivery tests and `./mvnw verify`; commit/push:
   `feat: reserve inventory atomically with duplicate protection`.
 
 ## 7. Order outcomes and dead-letter recovery

@@ -161,3 +161,20 @@ Implementer full SDKMAN Temurin 25.0.4 `./mvnw -B verify` PASS: six modules,
 58 tests, zero failures/errors/skips. Fresh controller-owned verification also
 PASS: six modules, 58 tests, zero failures/errors/skips. Docker Desktop startup and
 credential-helper latency extended the controller run to 23:20 without test failures.
+Task 5 remote checkpoint: local and remote SHA matched at 375c78d after review
+records were committed and pushed.
+Task 6: in progress; base 375c78d; implementer inventory_reservation.
+Task 6: locally implemented in 3dc08b1. Full SDKMAN Java 25 reactor verification
+PASS: six modules, 69 tests, zero failures/errors/skips. Independent reviewer
+inventory_reservation_review dispatched against 375c78d..3dc08b1.
+Task 6 review: fix round 1/5 for Important missing `metadata.occurredAt`
+validation. A malformed event could otherwise reserve stock and create a result;
+the fix must reject it before locks/claims/writes and prove zero persistence.
+Task 6: fix round 1/5 addressed in ceb6e83. Missing occurredAt now fails before
+advisory locking or persistence; regression proves unchanged stock and zero
+reservation, processed-event, and outbox rows. Scoped re-review approved with zero
+open Critical/Important findings.
+Task 6: complete (commits 3dc08b1 and ceb6e83; review clean after one fix round).
+Implementer full SDKMAN Temurin 25.0.4 `./mvnw -B verify` PASS: six modules,
+70 tests, zero failures/errors/skips. Fresh controller-owned verification also
+PASS: six modules, 70 tests, zero failures/errors/skips in 3:29.

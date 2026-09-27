@@ -63,3 +63,42 @@ commits the decision, stock changes, processed-event record, and result outbox.
   use record acknowledgement after successful return, never before DB commit.
 - [ ] Run concurrency/redelivery tests and `./mvnw verify`; commit/push:
   `feat: reserve inventory atomically with duplicate protection`.
+
+## Execution context
+
+- Baseline is reviewed and remotely synchronized commit `375c78d`: Java 25,
+  Spring Boot 4.1.1, versioned event contracts, migrated Inventory tables, locked
+  stock additions, and reliable outbox publishers. The local reactor has 58 tests.
+- Java 25 is active through SDKMAN. There is no GitHub Actions pipeline; local
+  `./mvnw -B verify` is the required gate. Docker Desktop is available but has shown
+  intermittent container-start and credential-helper latency; use bounded waits and
+  distinguish host latency from product failures.
+- Reuse Boot-managed Spring Kafka 4.1.1, Kafka client 4.2.1, Testcontainers 2.0.5,
+  PostgreSQL 18.1, and `apache/kafka-native:4.1.1`. Do not pin parallel client lines.
+- `ReservationService.reserve(OrderCreated)` is the transactional boundary. The
+  listener decodes with `EventCodec`, delegates through the injected service proxy,
+  and returns only after commit. Configure record acknowledgement with auto-commit
+  disabled; do not manually acknowledge before the service returns.
+- Normalize event items by product UUID and compute a stable fingerprint. Reject
+  duplicate product IDs in an event as a contract/technical error rather than a
+  business rejection. A repeated order ID with a different fingerprint is also a
+  contract error and must not alter stock or create a second result.
+- Make duplicate handling conflict-safe without relying on a caught JPA constraint
+  violation inside an aborted transaction. Identical event-ID redelivery and a new
+  event ID for an already-decided order must not decrement stock or add an outbox
+  row again. Record processed event IDs consistently with that decision.
+- Lock all referenced existing product rows in sorted UUID order using the same
+  pessimistic discipline as stock additions. Determine unknown products and all
+  shortages before mutating any quantity. Persist exactly one reservation decision,
+  one processed-event record, and one StockReserved/StockRejected outbox row in the
+  same transaction as stock changes.
+- Use the incoming event's `occurredAt` only as event data. Inject `Clock` for the
+  Inventory decision/result timestamps, and set result `causationId` to the incoming
+  OrderCreated event ID. Topics remain `orders.v1` and `reservation-results.v1`.
+- Include direct transactional service tests for complete business/concurrency
+  coverage and at least one real Kafka/PostgreSQL listener test proving delegation
+  and record acknowledgement behavior. Task 7 owns bounded retries and DLT wiring;
+  do not implement those here.
+- Parent owns ledger, acceptance matrix, briefs, review artifacts, and pushes.
+  Commit implementation locally after focused tests and a full local verification;
+  do not push.

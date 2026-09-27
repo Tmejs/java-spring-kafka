@@ -164,3 +164,25 @@ their actual outcomes, and any remaining limitations before committing and pushi
   passed all six modules and 58 tests. Fresh controller verification passed the same
   six modules and 58 tests with zero failures, errors, or skips; Docker Desktop host
   latency extended that run to 23:20.
+
+## Atomic inventory reservation checkpoint — 2026-09-27
+
+- Added the `orders.v1` Inventory listener and transactional reservation service.
+  Consumer auto-commit is disabled and record acknowledgement occurs only after the
+  proxied database transaction returns.
+- A transaction-scoped PostgreSQL advisory lock serializes decisions for one order,
+  while conflict-safe event and decision inserts make identical delivery and new
+  event IDs for an existing order safe without changing the pushed V1 schema.
+- Product rows are pessimistically locked in UUID order. All products and quantities
+  are checked before any decrement, so unknown products or shortages leave every
+  stock value unchanged. Competing orders cannot oversell.
+- Stock changes, processed-event claims, the reservation decision, and one versioned
+  StockReserved/StockRejected outbox event commit atomically. Technical failure rolls
+  back every effect; changed repeated-order fingerprints fail as contract errors.
+- Real PostgreSQL/Kafka coverage verifies multi-item outcomes, duplicates, concurrent
+  same-order and competing-order processing, technical rollback, committed consumer
+  offsets, and duplicate Kafka delivery with one business effect.
+- Independent review requested required `occurredAt` validation, then approved the
+  focused fix with no Critical or Important findings. The implementer Java 25 gate
+  passed all six modules and 70 tests. Fresh controller verification passed the same
+  six modules and 70 tests with zero failures, errors, or skips in 3:29.
