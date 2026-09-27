@@ -305,22 +305,22 @@ both services `observability/ObservabilityIT.java`; listener correlation handlin
 
 **Produces:** health/probe and Prometheus endpoints on management ports, JSON logs.
 
-- [ ] Write HTTP metric/probe tests and assertions that a duplicate does not
+- [x] Write HTTP metric/probe tests and assertions that a duplicate does not
   increment business counters. Test correlation cleanup even after an exception.
   ```java
   assertThat(afterDuplicates - beforeDuplicates).isEqualTo(1.0);
   assertThat(metricTagKeys).doesNotContain("orderId", "eventId", "productId");
   ```
-- [ ] Add Actuator/Prometheus registry; expose only health and prometheus. Enable
+- [x] Add Actuator/Prometheus registry; expose only health and prometheus. Enable
   probes and separate management ports. Require `metrics.read` and the correct
   audience for metrics; permit minimal health responses without authentication. Keep liveness independent of DB/Kafka;
   readiness includes DB and a bounded Kafka connectivity check.
-- [ ] Add orders-created and reservation-outcome counters after transaction commit,
+- [x] Add orders-created and reservation-outcome counters after transaction commit,
   reservation timer, publisher failures, duplicates, and DLT outcomes. Refresh
   outbox count/oldest-age gauges periodically into atomic cached values.
-- [ ] Enable framework HTTP/JVM/pool/Kafka metrics. Emit JSON logs and add order/event
+- [x] Enable framework HTTP/JVM/pool/Kafka metrics. Emit JSON logs and add order/event
   IDs with try/finally context cleanup; use no IDs in tags or raw payload logging.
-- [ ] Run rollback/duplicate/endpoint tests and `./mvnw verify`; commit/push:
+- [x] Run rollback/duplicate/endpoint tests and `./mvnw verify`; commit/push:
   `feat: expose operational metrics and structured correlation logs`.
 
 ## 9. Complete Docker Compose runtime

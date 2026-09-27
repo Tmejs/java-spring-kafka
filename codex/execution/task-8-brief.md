@@ -62,3 +62,15 @@ both services `observability/ObservabilityIT.java`; listener correlation handlin
   IDs with try/finally context cleanup; use no IDs in tags or raw payload logging.
 - [ ] Run rollback/duplicate/endpoint tests and `./mvnw verify`; commit/push:
   `feat: expose operational metrics and structured correlation logs`.
+
+## Execution baseline
+
+- Start from remote-synchronized commit `c9e32c2` on `feature/reservation-v1`.
+- The fresh controller baseline is SDKMAN Temurin 25.0.4 with a green six-module
+  reactor and 91 tests (zero failures, errors, or skips).
+- Keep the implementation commit focused on Task 8. Do not modify Compose or add
+  Prometheus/Grafana infrastructure; those remain Tasks 9 and version 2 respectively.
+- Verify metric increments only after successful transaction completion and prove
+  duplicate and rollback paths do not increment business outcome counters.
+- Use bounded metric tag values only. Put per-order and per-event identifiers in
+  MDC fields and prove cleanup for HTTP and Kafka execution paths.

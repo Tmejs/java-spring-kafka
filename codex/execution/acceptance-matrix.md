@@ -22,8 +22,8 @@ claims of delivered functionality. Test names may evolve with implementation.
 | Terminal consistency | 7 | conflicting result cannot overwrite state | Verified |
 | Retry and DLT | 7 | malformed/exhausted events, unavailable DLT producer | Verified in both services |
 | Safe manual replay | 10 | exact key/payload/ID preserved | Pending |
-| Actuator protection | 8 | public minimal health, scoped metrics access | Policy verified; Actuator pending |
-| Observability | 8 | bounded labels, committed-only counters, MDC cleanup | Pending |
+| Actuator protection | 8 | public minimal health, scoped metrics access | Verified on separate management sockets with signed JWTs |
+| Observability | 8 | bounded labels, committed-only counters, MDC cleanup | Verified in both services |
 | One-command launch | 9 | Compose build and health readiness | Pending |
 | Persistent data | 9 | restart retains stock/orders | Pending |
 | Portfolio demo | 10 | repeatable successful/rejected orders and metric scrape | Pending |

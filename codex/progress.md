@@ -207,3 +207,23 @@ their actual outcomes, and any remaining limitations before committing and pushi
   scoped re-review with no Critical or Important findings. The implementer Java 25
   gate passed all six modules and 91 tests. Fresh controller verification passed
   the same six modules and 91 tests with zero failures, errors, or skips in 4:13.
+
+## Operational observability checkpoint — 2026-09-27
+
+- Added Actuator and Prometheus registries to both services on dedicated management
+  ports. Only minimal health/probes and Prometheus are exposed; real signed-token
+  tests prove service audience plus `metrics.read` scope enforcement.
+- Liveness depends only on application state. Readiness includes PostgreSQL and a
+  bounded Kafka Admin check, and remains responsive when Kafka is unavailable.
+- Added after-commit counters for created orders and reservation outcomes, duplicate
+  counters, reservation timing, outbox publication failures, DLT outcomes, and
+  cached outbox backlog/age gauges. Custom labels are bounded and exclude IDs.
+- Enabled framework and Kafka observations plus ECS JSON console logs. HTTP,
+  listener, and publisher scopes add correlation/order/event fields and restore MDC
+  state on success and failure without logging authorization headers or payloads.
+- Independent review found missing real structured publisher fields and incomplete
+  counter edge-case evidence. The focused fix added both and restored Kafka-health
+  thread interruption; scoped re-review passed with no Critical or Important issues.
+- The implementer clean Java 25 reactor passed all six modules and 104 tests with
+  zero failures, errors, or skips. Fresh controller verification passed the same
+  six modules and 104 tests with zero failures, errors, or skips in 1:59.

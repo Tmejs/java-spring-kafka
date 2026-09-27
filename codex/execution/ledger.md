@@ -198,3 +198,22 @@ Task 7: complete (commits 9f7596e and 6421892; review clean after one fix round)
 Implementer full SDKMAN Temurin 25.0.4 `./mvnw -B verify` PASS: six modules,
 91 tests, zero failures/errors/skips. Fresh controller-owned verification also
 passed all six modules and 91 tests with zero failures/errors/skips in 4:13.
+Task 7 remote checkpoint: local and remote SHA matched at c9e32c2 after review
+records were committed and pushed.
+Task 8: in progress; base c9e32c2; observability implementation and independent
+design audit dispatched.
+Task 8: locally implemented in 70aaa9c. Full SDKMAN Temurin 25.0.4
+`./mvnw -B clean verify` PASS: six modules, 101 tests, zero failures/errors/skips.
+Task 8 review: fix round 1/5 for two Important findings: emit real outbox order/event
+IDs as structured JSON fields, and prove Orders outcome plus both publisher failure
+metric semantics. Minor interrupt restoration in Kafka health checks is included in
+the same focused fix.
+Task 8: fix round 1/5 addressed in b839c7c. Real publisher success/failure logs now
+carry top-level ECS orderId/eventId fields with scoped cleanup; Orders outcome and
+both publisher suites prove duplicate, rollback, success, failure, and recovery
+counter semantics; both Kafka health checks preserve thread interruption.
+Scoped re-review approved with zero open Critical/Important findings.
+Task 8: complete (commits 70aaa9c and b839c7c; review clean after one fix round).
+Implementer full SDKMAN Temurin 25.0.4 `./mvnw -B clean verify` PASS: six modules,
+104 tests, zero failures/errors/skips. Fresh controller-owned `./mvnw -B verify`
+also passed all six modules and 104 tests with zero failures/errors/skips in 1:59.
