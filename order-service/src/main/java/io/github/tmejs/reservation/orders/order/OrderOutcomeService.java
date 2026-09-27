@@ -6,6 +6,7 @@ import io.github.tmejs.reservation.events.StockRejected;
 import io.github.tmejs.reservation.events.StockReserved;
 import io.github.tmejs.reservation.orders.messaging.OutboxRepository;
 import io.github.tmejs.reservation.orders.messaging.ProcessedEventRepository;
+import io.github.tmejs.reservation.orders.observability.BusinessMetrics;
 import java.time.Clock;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -17,16 +18,19 @@ public class OrderOutcomeService {
     private final OutboxRepository outbox;
     private final ProcessedEventRepository processedEvents;
     private final Clock clock;
+    private final BusinessMetrics metrics;
 
     public OrderOutcomeService(
             OrderRepository orders,
             OutboxRepository outbox,
             ProcessedEventRepository processedEvents,
-            Clock clock) {
+            Clock clock,
+            BusinessMetrics metrics) {
         this.orders = orders;
         this.outbox = outbox;
         this.processedEvents = processedEvents;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Transactional
@@ -55,6 +59,7 @@ public class OrderOutcomeService {
         String outcome = rejectionReason == null ? "CONFIRMED" : "REJECTED";
         order.verifyOutcome(outcome, rejectionReason);
         if (!processedEvents.tryClaim(metadata.eventId(), clock.instant())) {
+            metrics.duplicateAfterCommit(metadata.eventType());
             return;
         }
         if (rejectionReason == null) {
@@ -62,6 +67,8 @@ public class OrderOutcomeService {
         } else {
             order.reject(rejectionReason, metadata.occurredAt());
         }
+        metrics.reservationOutcomeAfterCommit(outcome.toLowerCase(java.util.Locale.ROOT),
+                rejectionReason == null ? "none" : rejectionReason.toLowerCase(java.util.Locale.ROOT));
     }
 
     private static void validate(EventMetadata metadata, String expectedType, UUID causationId) {

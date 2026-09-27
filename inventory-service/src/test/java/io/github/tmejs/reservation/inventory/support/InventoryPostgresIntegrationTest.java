@@ -22,5 +22,6 @@ public abstract class InventoryPostgresIntegrationTest {
         registry.add("spring.datasource.username", DATABASE::getUsername);
         registry.add("spring.datasource.password", DATABASE::getPassword);
         registry.add("reservation.outbox.scheduling-enabled", () -> "false");
+        registry.add("management.server.port", () -> "0");
     }
 }

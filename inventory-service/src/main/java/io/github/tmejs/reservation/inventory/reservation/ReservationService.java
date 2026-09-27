@@ -8,6 +8,7 @@ import io.github.tmejs.reservation.events.StockRejected;
 import io.github.tmejs.reservation.events.StockReserved;
 import io.github.tmejs.reservation.inventory.messaging.OutboxEntity;
 import io.github.tmejs.reservation.inventory.messaging.OutboxRepository;
+import io.github.tmejs.reservation.inventory.observability.BusinessMetrics;
 import io.github.tmejs.reservation.inventory.product.ProductEntity;
 import io.github.tmejs.reservation.inventory.product.ProductRepository;
 import java.nio.charset.StandardCharsets;
@@ -37,18 +38,21 @@ public class ReservationService {
     private final OutboxRepository outbox;
     private final EventCodec codec;
     private final Clock clock;
+    private final BusinessMetrics metrics;
 
     public ReservationService(
             ReservationRepository reservations,
             ProductRepository products,
             OutboxRepository outbox,
             EventCodec codec,
-            Clock clock) {
+            Clock clock,
+            BusinessMetrics metrics) {
         this.reservations = reservations;
         this.products = products;
         this.outbox = outbox;
         this.codec = codec;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Transactional
@@ -64,10 +68,12 @@ public class ReservationService {
         if (!newEvent) {
             verifyExisting(existing.orElseThrow(() ->
                     new IllegalStateException("Processed event has no reservation decision")), fingerprint);
+            metrics.duplicateAfterCommit(EventCodec.ORDER_CREATED);
             return;
         }
         if (existing.isPresent()) {
             verifyExisting(existing.get(), fingerprint);
+            metrics.duplicateAfterCommit(EventCodec.ORDER_CREATED);
             return;
         }
 
@@ -92,6 +98,8 @@ public class ReservationService {
             throw new IllegalStateException("Reservation decision was concurrently created");
         }
         saveResult(source, decidedAt, rejectionReason);
+        metrics.reservationOutcomeAfterCommit(outcome.toLowerCase(java.util.Locale.ROOT),
+                rejectionReason == null ? "none" : rejectionReason.toLowerCase(java.util.Locale.ROOT));
     }
 
     private void saveResult(EventMetadata source, Instant decidedAt, String rejectionReason) {

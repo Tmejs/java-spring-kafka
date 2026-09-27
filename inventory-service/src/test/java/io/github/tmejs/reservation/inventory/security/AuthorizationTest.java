@@ -78,31 +78,17 @@ class AuthorizationTest extends InventoryPostgresIntegrationTest {
     }
 
     @Test
-    void monitoringScopeCanUseMetricsButNotBusinessRoutes() throws Exception {
-        mockMvc.perform(get("/actuator/prometheus")
-                        .with(token("monitoring", List.of(), "inventory-api metrics.read")))
-                .andExpect(status().isOk());
-        mockMvc.perform(get("/products")
-                        .with(token("monitoring", List.of(), "inventory-api metrics.read")))
-                .andExpect(status().isForbidden());
-    }
-
-    @Test
-    void customerCannotUseMetricsAndUnmatchedRoutesAreDenied() throws Exception {
-        mockMvc.perform(get("/actuator/prometheus")
-                        .with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
-                .andExpect(status().isForbidden());
+    void unmatchedRoutesAreDenied() throws Exception {
         mockMvc.perform(get("/unmatched")
                         .with(token("alice-subject", List.of("CUSTOMER"), "inventory-api")))
                 .andExpect(status().isForbidden());
     }
 
     @Test
-    void swaggerSpecAndHealthArePublic() throws Exception {
+    void swaggerSpecIsPublic() throws Exception {
         mockMvc.perform(get("/openapi/inventory.yaml")).andExpect(status().isOk());
         mockMvc.perform(get("/swagger-ui/index.html")).andExpect(status().isOk());
         mockMvc.perform(get("/v3/api-docs/swagger-config")).andExpect(status().isOk());
-        mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
     }
 
     private RequestPostProcessor token(String subject, List<String> roles, String scope) {
@@ -132,15 +118,6 @@ class AuthorizationTest extends InventoryPostgresIntegrationTest {
     @RestController
     static class FixtureEndpoints {
 
-        @GetMapping("/actuator/prometheus")
-        String metrics() {
-            return "metrics";
-        }
-
-        @GetMapping("/actuator/health")
-        String health() {
-            return "up";
-        }
 
         @GetMapping("/unmatched")
         String unmatched() {

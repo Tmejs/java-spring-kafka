@@ -9,6 +9,7 @@ import io.github.tmejs.reservation.events.OrderCreated;
 import io.github.tmejs.reservation.events.OrderLine;
 import io.github.tmejs.reservation.inventory.InventoryApplication;
 import io.github.tmejs.reservation.inventory.support.InventoryPostgresIntegrationTest;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -69,6 +70,7 @@ class DeadLetterIT extends InventoryPostgresIntegrationTest {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private EventCodec codec;
     @Autowired private RetryProbe retryProbe;
+    @Autowired private MeterRegistry metrics;
 
     @DynamicPropertySource
     static void kafkaProperties(DynamicPropertyRegistry registry) {
@@ -88,6 +90,7 @@ class DeadLetterIT extends InventoryPostgresIntegrationTest {
 
     @Test
     void malformedJsonRetriesThreeTimesThenPublishesOriginalAndCommitsOffset() throws Exception {
+        double recoveredBefore = dltCount("success");
         String key = UUID.randomUUID().toString();
         String payload = "{not-json";
         var sent = kafka.send(new ProducerRecord<>(SOURCE, 1, key, payload)).get(10, TimeUnit.SECONDS);
@@ -102,6 +105,7 @@ class DeadLetterIT extends InventoryPostgresIntegrationTest {
                 assertThat(committedOffset(1)).isGreaterThanOrEqualTo(sent.getRecordMetadata().offset() + 1));
         assertThat(count("reservations")).isZero();
         assertThat(count("processed_events")).isZero();
+        assertThat(dltCount("success") - recoveredBefore).isEqualTo(1.0);
     }
 
     @Test
@@ -152,6 +156,7 @@ class DeadLetterIT extends InventoryPostgresIntegrationTest {
 
     @Test
     void failedDltPublicationLeavesSourceOffsetUncommitted() throws Exception {
+        double failuresBefore = dltCount("failure");
         deleteTopic(DLT);
         String key = UUID.randomUUID().toString();
         var sent = kafka.send(new ProducerRecord<>(SOURCE, key, "{still-bad"))
@@ -160,6 +165,7 @@ class DeadLetterIT extends InventoryPostgresIntegrationTest {
             await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
                 assertThat(retryProbe.attempts(key)).hasSizeGreaterThanOrEqualTo(5);
                 assertThat(retryProbe.recoveryFailures()).isPositive();
+                assertThat(dltCount("failure")).isGreaterThan(failuresBefore);
             });
             assertThat(committedOffset(sent.getRecordMetadata().partition()))
                     .isLessThan(sent.getRecordMetadata().offset() + 1);
@@ -167,6 +173,11 @@ class DeadLetterIT extends InventoryPostgresIntegrationTest {
             ensureTopic(DLT);
         }
         assertThat(consumeMatching(key, Duration.ofSeconds(12)).value()).isEqualTo("{still-bad");
+    }
+
+    private double dltCount(String outcome) {
+        return metrics.find("reservation.dlt.publications").tag("outcome", outcome).counters().stream()
+                .mapToDouble(counter -> counter.count()).sum();
     }
 
     private int count(String table) {

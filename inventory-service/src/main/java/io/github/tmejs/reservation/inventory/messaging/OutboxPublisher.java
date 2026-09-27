@@ -14,6 +14,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import io.github.tmejs.reservation.inventory.observability.BusinessMetrics;
 
 @Component
 public class OutboxPublisher {
@@ -27,12 +28,14 @@ public class OutboxPublisher {
     private final Duration initialBackoff;
     private final Duration maximumBackoff;
     private final ReentrantLock cycleLock = new ReentrantLock();
+    private final BusinessMetrics metrics;
 
     public OutboxPublisher(OutboxRepository outbox, KafkaTemplate<String, String> kafka, Clock clock,
             @Value("${reservation.outbox.batch-size:100}") int batchSize,
             @Value("${reservation.outbox.ack-timeout:10s}") Duration ackTimeout,
             @Value("${reservation.outbox.backoff-initial:1s}") Duration initialBackoff,
-            @Value("${reservation.outbox.backoff-max:5m}") Duration maximumBackoff) {
+            @Value("${reservation.outbox.backoff-max:5m}") Duration maximumBackoff,
+            BusinessMetrics metrics) {
         this.outbox = outbox;
         this.kafka = kafka;
         this.clock = clock;
@@ -40,6 +43,7 @@ public class OutboxPublisher {
         this.ackTimeout = ackTimeout;
         this.initialBackoff = initialBackoff;
         this.maximumBackoff = maximumBackoff;
+        this.metrics = metrics;
     }
 
     @Scheduled(fixedDelayString = "${reservation.outbox.fixed-delay:1s}",
@@ -87,7 +91,10 @@ public class OutboxPublisher {
         Instant failedAt = clock.instant();
         String detail = exception.getClass().getSimpleName() + ": " + exception.getMessage();
         if (detail.length() > MAX_ERROR_LENGTH) detail = detail.substring(0, MAX_ERROR_LENGTH);
-        outbox.recordFailure(message.getId(), safePlus(failedAt, backoffFor(message.getAttemptCount())), detail);
+        int updated = outbox.recordFailure(message.getId(), safePlus(failedAt, backoffFor(message.getAttemptCount())), detail);
+        if (updated == 1) {
+            metrics.outboxPublishFailure(message.getEventType());
+        }
         LOG.warn("Outbox publish failed eventId={} orderId={} topic={} attempt={}",
                 message.getEventId(), message.getOrderId(), message.getTopic(), message.getAttemptCount() + 1, exception);
     }

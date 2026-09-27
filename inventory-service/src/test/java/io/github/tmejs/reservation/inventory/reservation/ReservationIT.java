@@ -12,6 +12,7 @@ import io.github.tmejs.reservation.events.StockRejected;
 import io.github.tmejs.reservation.events.StockReserved;
 import io.github.tmejs.reservation.inventory.InventoryApplication;
 import io.github.tmejs.reservation.inventory.support.InventoryPostgresIntegrationTest;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -55,6 +56,7 @@ class ReservationIT extends InventoryPostgresIntegrationTest {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private KafkaTemplate<String, String> kafka;
     @Autowired private EventCodec codec;
+    @Autowired private MeterRegistry metrics;
 
     @DynamicPropertySource
     static void kafkaProperties(DynamicPropertyRegistry registry) {
@@ -117,6 +119,8 @@ class ReservationIT extends InventoryPostgresIntegrationTest {
         UUID product = product(5);
         OrderCreated event = event(UUID.randomUUID(), UUID.randomUUID(), List.of(new OrderLine(product, 2)));
 
+        double outcomesBefore = counter("reservation.outcomes");
+        double duplicatesBefore = counter("reservation.events.duplicates");
         reservations.reserve(event);
         reservations.reserve(event);
 
@@ -124,6 +128,8 @@ class ReservationIT extends InventoryPostgresIntegrationTest {
         assertThat(count("reservations")).isOne();
         assertThat(count("processed_events")).isOne();
         assertThat(count("outbox")).isOne();
+        assertThat(counter("reservation.outcomes") - outcomesBefore).isEqualTo(1.0);
+        assertThat(counter("reservation.events.duplicates") - duplicatesBefore).isEqualTo(1.0);
     }
 
     @Test
@@ -254,6 +260,7 @@ class ReservationIT extends InventoryPostgresIntegrationTest {
                 + "begin raise exception 'test outbox failure'; end $$");
         jdbc.execute("create trigger reject_test_outbox before insert on outbox "
                 + "for each row execute function reject_test_outbox()");
+        double outcomesBefore = counter("reservation.outcomes");
         try {
             assertThatThrownBy(() -> reservations.reserve(event)).isInstanceOf(RuntimeException.class);
         } finally {
@@ -265,6 +272,7 @@ class ReservationIT extends InventoryPostgresIntegrationTest {
         assertThat(count("reservations")).isZero();
         assertThat(count("processed_events")).isZero();
         assertThat(count("outbox")).isZero();
+        assertThat(counter("reservation.outcomes") - outcomesBefore).isZero();
     }
 
     @Test
@@ -326,6 +334,10 @@ class ReservationIT extends InventoryPostgresIntegrationTest {
 
     private int count(String table) {
         return jdbc.queryForObject("select count(*) from " + table, Integer.class);
+    }
+
+    private double counter(String name) {
+        return metrics.find(name).counters().stream().mapToDouble(counter -> counter.count()).sum();
     }
 
     private String outboxPayload() {

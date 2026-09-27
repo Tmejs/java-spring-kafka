@@ -8,6 +8,7 @@ import io.github.tmejs.reservation.events.EventMetadata;
 import io.github.tmejs.reservation.events.StockReserved;
 import io.github.tmejs.reservation.orders.OrderApplication;
 import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -70,6 +71,7 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private EventCodec codec;
     @Autowired private RetryProbe retryProbe;
+    @Autowired private MeterRegistry metrics;
 
     @DynamicPropertySource
     static void kafkaProperties(DynamicPropertyRegistry registry) {
@@ -87,6 +89,7 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
 
     @Test
     void retriesMalformedJsonFourTotalDeliveriesThenPublishesOriginalToDltAndCommitsOffset() throws Exception {
+        double recoveredBefore = dltCount("success");
         String key = UUID.randomUUID().toString();
         String payload = "{not-json";
         var sent = kafka.send(new ProducerRecord<>(SOURCE, 1, key, payload)).get(10, TimeUnit.SECONDS);
@@ -100,6 +103,7 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
                 assertThat(committedOffset(1)).isGreaterThanOrEqualTo(sent.getRecordMetadata().offset() + 1));
         assertThat(jdbc.queryForObject("select count(*) from processed_events", Integer.class)).isZero();
+        assertThat(dltCount("success") - recoveredBefore).isEqualTo(1.0);
     }
 
     @Test
@@ -144,6 +148,7 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
 
     @Test
     void failedDltPublicationDoesNotAdvanceSourceOffset() throws Exception {
+        double failuresBefore = dltCount("failure");
         deleteTopic(DLT);
         String key = UUID.randomUUID().toString();
         var sent = kafka.send(new ProducerRecord<>(SOURCE, key, "{still-bad"))
@@ -153,6 +158,7 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
             await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
                 assertThat(retryProbe.attempts(key)).hasSizeGreaterThanOrEqualTo(5);
                 assertThat(retryProbe.recoveryFailures()).isPositive();
+                assertThat(dltCount("failure")).isGreaterThan(failuresBefore);
             });
             assertThat(committedOffset(sent.getRecordMetadata().partition()))
                     .isLessThan(sent.getRecordMetadata().offset() + 1);
@@ -160,6 +166,11 @@ class DeadLetterIT extends OrderPostgresIntegrationTest {
             ensureTopic(DLT);
         }
         assertThat(consumeMatching(DLT, key, Duration.ofSeconds(12)).value()).isEqualTo("{still-bad");
+    }
+
+    private double dltCount(String outcome) {
+        return metrics.find("reservation.dlt.publications").tag("outcome", outcome).counters().stream()
+                .mapToDouble(counter -> counter.count()).sum();
     }
 
     @Test

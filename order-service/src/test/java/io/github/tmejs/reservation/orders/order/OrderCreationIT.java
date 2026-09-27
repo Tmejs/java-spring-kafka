@@ -20,6 +20,7 @@ import io.github.tmejs.reservation.client.orders.model.RejectionReason;
 import io.github.tmejs.reservation.events.EventCodec;
 import io.github.tmejs.reservation.events.EventMetadata;
 import io.github.tmejs.reservation.events.StockRejected;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.github.tmejs.reservation.orders.OrderApplication;
 import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
 import java.io.IOException;
@@ -81,6 +82,9 @@ class OrderCreationIT extends OrderPostgresIntegrationTest {
     @Autowired
     private OrderOutcomeService outcomes;
 
+    @Autowired
+    private MeterRegistry metrics;
+
     @BeforeEach
     void clearOrders() {
         jdbc.execute("truncate table order_items, idempotency_keys, outbox, processed_events, orders cascade");
@@ -106,6 +110,8 @@ class OrderCreationIT extends OrderPostgresIntegrationTest {
         var firstRequest = request(item(firstProduct, 2), item(secondProduct, 1));
         var reorderedRequest = request(item(secondProduct, 1), item(firstProduct, 2));
         OrdersApi alice = api("alice-subject");
+        double createdBefore = counter("reservation.orders.created");
+        double duplicatesBefore = counter("reservation.events.duplicates");
 
         ApiResponse<Order> first = alice.createOrderWithHttpInfo("replay-key", firstRequest);
         UUID createdEventId = jdbc.queryForObject(
@@ -128,6 +134,8 @@ class OrderCreationIT extends OrderPostgresIntegrationTest {
         assertThat(jdbc.queryForObject("select count(*) from order_items", Integer.class)).isEqualTo(2);
         assertThat(jdbc.queryForObject("select count(*) from outbox where published_at is null", Integer.class))
                 .isEqualTo(1);
+        assertThat(counter("reservation.orders.created") - createdBefore).isEqualTo(1.0);
+        assertThat(counter("reservation.events.duplicates") - duplicatesBefore).isEqualTo(1.0);
 
         String payload = jdbc.queryForObject("select payload from outbox", String.class);
         var event = new EventCodec().decodeOrderCreated(payload);
@@ -246,6 +254,10 @@ class OrderCreationIT extends OrderPostgresIntegrationTest {
 
     private static CreateOrderRequest request(OrderItem... items) {
         return new CreateOrderRequest().items(List.of(items));
+    }
+
+    private double counter(String name) {
+        return metrics.find(name).counters().stream().mapToDouble(counter -> counter.count()).sum();
     }
 
     private static OrderItem item(UUID productId, int quantity) {

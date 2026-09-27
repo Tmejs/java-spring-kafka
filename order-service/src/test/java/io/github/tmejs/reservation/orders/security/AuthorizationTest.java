@@ -60,31 +60,17 @@ class AuthorizationTest extends OrderPostgresIntegrationTest {
     }
 
     @Test
-    void monitoringScopeCanUseMetricsButNotOrders() throws Exception {
-        var monitoring = token("monitoring", List.of(), "orders-api metrics.read");
-
-        mockMvc.perform(get("/actuator/prometheus").with(monitoring))
-                .andExpect(status().isOk());
-        mockMvc.perform(post("/orders").with(token("monitoring", List.of(), "orders-api metrics.read")))
-                .andExpect(status().isForbidden());
-    }
-
-    @Test
-    void customerCannotUseMetricsAndUnmatchedRoutesAreDenied() throws Exception {
-        mockMvc.perform(get("/actuator/prometheus")
-                        .with(token("alice-subject", List.of("CUSTOMER"), "orders-api")))
-                .andExpect(status().isForbidden());
+    void unmatchedRoutesAreDenied() throws Exception {
         mockMvc.perform(get("/unmatched")
                         .with(token("alice-subject", List.of("CUSTOMER"), "orders-api")))
                 .andExpect(status().isForbidden());
     }
 
     @Test
-    void swaggerSpecAndHealthArePublic() throws Exception {
+    void swaggerSpecIsPublic() throws Exception {
         mockMvc.perform(get("/openapi/orders.yaml")).andExpect(status().isOk());
         mockMvc.perform(get("/swagger-ui/index.html")).andExpect(status().isOk());
         mockMvc.perform(get("/v3/api-docs/swagger-config")).andExpect(status().isOk());
-        mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
     }
 
     private RequestPostProcessor token(String subject, List<String> roles, String scope) {
@@ -128,16 +114,6 @@ class AuthorizationTest extends OrderPostgresIntegrationTest {
         @GetMapping("/orders/{id}")
         String getOrder() {
             return currentOwner.subject();
-        }
-
-        @GetMapping("/actuator/prometheus")
-        String metrics() {
-            return "metrics";
-        }
-
-        @GetMapping("/actuator/health")
-        String health() {
-            return "up";
         }
 
         @GetMapping("/unmatched")

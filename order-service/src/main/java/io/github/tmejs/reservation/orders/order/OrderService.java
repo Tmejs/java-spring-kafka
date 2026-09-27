@@ -7,6 +7,7 @@ import io.github.tmejs.reservation.events.OrderLine;
 import io.github.tmejs.reservation.orders.idempotency.IdempotencyRepository;
 import io.github.tmejs.reservation.orders.messaging.OutboxEntity;
 import io.github.tmejs.reservation.orders.messaging.OutboxRepository;
+import io.github.tmejs.reservation.orders.observability.BusinessMetrics;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -33,6 +34,7 @@ public class OrderService {
     private final EventCodec eventCodec;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final BusinessMetrics metrics;
 
     OrderService(
             OrderRepository orders,
@@ -40,13 +42,15 @@ public class OrderService {
             OutboxRepository outbox,
             EventCodec eventCodec,
             ObjectMapper objectMapper,
-            Clock clock) {
+            Clock clock,
+            BusinessMetrics metrics) {
         this.orders = orders;
         this.idempotency = idempotency;
         this.outbox = outbox;
         this.eventCodec = eventCodec;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Transactional
@@ -64,6 +68,7 @@ public class OrderService {
             if (stored.payload() == null || stored.location() == null) {
                 throw new IllegalStateException("Completed idempotency response is missing");
             }
+            metrics.duplicateAfterCommit(EventCodec.ORDER_CREATED);
             return new CreationResult(decodeResponse(stored.payload()), stored.location());
         }
 
@@ -95,6 +100,7 @@ public class OrderService {
         var response = new OrderView(orderId, canonicalItems, "PENDING", null);
         String location = "/orders/" + orderId;
         idempotency.complete(ownerSubject, idempotencyKey, orderId, encodeResponse(response), location);
+        metrics.orderCreatedAfterCommit();
         return new CreationResult(response, location);
     }
 

@@ -81,6 +81,10 @@ public class OutboxEntity {
         return topic;
     }
 
+    public String getEventType() {
+        return eventType;
+    }
+
     public String getPayload() {
         return payload;
     }
