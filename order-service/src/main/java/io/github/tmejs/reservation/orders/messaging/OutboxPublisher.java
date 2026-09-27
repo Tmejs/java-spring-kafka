@@ -15,6 +15,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import io.github.tmejs.reservation.orders.observability.BusinessMetrics;
+import io.github.tmejs.reservation.orders.observability.CorrelationContext;
 
 @Component
 public class OutboxPublisher {
@@ -71,6 +72,11 @@ public class OutboxPublisher {
     }
 
     private boolean publish(OutboxEntity message) {
+        return CorrelationContext.withMessageIds(
+                message.getOrderId(), message.getEventId(), () -> publishWithContext(message));
+    }
+
+    private boolean publishWithContext(OutboxEntity message) {
         try {
             kafka.send(message.getTopic(), message.getOrderId().toString(), message.getPayload())
                     .get(ackTimeout.toMillis(), TimeUnit.MILLISECONDS);

@@ -21,7 +21,9 @@
   HTTP, JVM, connection-pool, and Kafka meters.
 - Enabled Spring Boot ECS JSON console logs. HTTP and listener correlation contexts
   add correlation, order, and event identifiers to MDC with scoped cleanup that
-  preserves unrelated MDC entries. Kafka producer failure logs omit record values.
+  preserves unrelated MDC entries. Real outbox success and failure logs use the same
+  scoped context, so ECS output contains top-level `orderId` and `eventId` fields.
+  Kafka producer failure logs omit record values.
 
 ## Test-first evidence
 
@@ -39,8 +41,14 @@ added in small green steps.
 - Existing PostgreSQL integration tests now prove successful mutation, duplicate,
   and rollback metric deltas. Existing DLT tests prove successful and failed
   recovery metrics.
+- Review fix focused suite: 25 tests, 0 failures, 0 errors, 0 skips. Publisher tests
+  parse real success and failure ECS lines, verify top-level order/event fields and
+  MDC cleanup, and prove failure counters change for persisted failures but remain
+  unchanged for successful publication and later recovery. Order outcome tests prove
+  exact redelivery counts one outcome and an outer transaction rollback counts none.
+  Health indicator tests prove interrupted waits restore the thread interrupt flag.
 - Java 25.0.4 full reactor: `./mvnw -B clean verify` passed all six modules with
-  101 tests, 0 failures, 0 errors, and 0 skips.
+  104 tests, 0 failures, 0 errors, and 0 skips.
 - `git diff --check` passed.
 
 ## Design decisions
@@ -52,7 +60,8 @@ added in small green steps.
   result values. Order, event, and product identifiers are log fields only.
 - Kafka readiness opens a short-lived Admin client for each check and uses the
   configured two-second bound. This avoids a lingering background Admin client when
-  Kafka is unavailable.
+  Kafka is unavailable, and interrupted checks restore the calling thread's interrupt
+  status.
 - Outbox gauges use scheduled JDBC snapshots held in atomics. A scrape reads only
   cached values.
 - DLT metrics use Spring Kafka retry callbacks so recovery success and recovery

@@ -3,6 +3,7 @@ package io.github.tmejs.reservation.inventory.messaging;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.github.tmejs.reservation.inventory.InventoryApplication;
 import io.github.tmejs.reservation.inventory.support.InventoryPostgresIntegrationTest;
 import java.time.Duration;
@@ -19,8 +20,12 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -31,6 +36,7 @@ import org.testcontainers.kafka.KafkaContainer;
         "reservation.outbox.batch-size=2", "reservation.outbox.scheduling-enabled=false",
         "reservation.outbox.ack-timeout=1s", "reservation.outbox.backoff-initial=5s",
         "reservation.outbox.backoff-max=10s", "logging.level.org.apache.kafka=WARN"})
+@ExtendWith(OutputCaptureExtension.class)
 class OutboxPublisherIT extends InventoryPostgresIntegrationTest {
     private static final String TOPIC = "reservation-results.v1";
     private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka-native:4.1.1");
@@ -40,6 +46,7 @@ class OutboxPublisherIT extends InventoryPostgresIntegrationTest {
     @Autowired private OutboxPublisher publisher;
     @Autowired private KafkaTemplate<String, String> kafka;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private MeterRegistry metrics;
 
     @DynamicPropertySource
     static void kafkaProperties(DynamicPropertyRegistry registry) {
@@ -52,9 +59,18 @@ class OutboxPublisherIT extends InventoryPostgresIntegrationTest {
     }
 
     @Test
-    void publishesBoundedBatchWithOrderKeyAndMarksAcknowledgedRows() {
+    void publishesBoundedBatchWithOrderKeyAndMarksAcknowledgedRows(CapturedOutput output) {
         List<TestEvent> events = List.of(insert(TOPIC), insert(TOPIC), insert(TOPIC));
-        publisher.publishBatch();
+        double failuresBefore = publishFailures();
+        MDC.put("traceId", "existing-trace");
+        try {
+            publisher.publishBatch();
+            assertThat(MDC.get("traceId")).isEqualTo("existing-trace");
+            assertThat(MDC.get("orderId")).isNull();
+            assertThat(MDC.get("eventId")).isNull();
+        } finally {
+            MDC.clear();
+        }
 
         List<Published> published = consume(2,
                 copy -> events.stream().anyMatch(event -> event.payload().equals(copy.payload())));
@@ -66,13 +82,25 @@ class OutboxPublisherIT extends InventoryPostgresIntegrationTest {
                 .isEqualTo(2);
         assertThat(jdbc.queryForObject("select count(*) from outbox where published_at is null", Integer.class))
                 .isEqualTo(1);
+        assertThat(publishFailures() - failuresBefore).isZero();
+        assertStructuredIds(output, "Published outbox event", events.get(0));
+        assertStructuredIds(output, "Published outbox event", events.get(1));
     }
 
     @Test
-    void failedRowStaysPendingWithBackoffAndDoesNotBlockNextRow() {
+    void failedRowStaysPendingWithBackoffAndDoesNotBlockNextRow(CapturedOutput output) {
         TestEvent failed = insert("invalid topic name");
         TestEvent succeeding = insert(TOPIC);
-        publisher.publishBatch();
+        double failuresBefore = publishFailures();
+        MDC.put("traceId", "existing-trace");
+        try {
+            publisher.publishBatch();
+            assertThat(MDC.get("traceId")).isEqualTo("existing-trace");
+            assertThat(MDC.get("orderId")).isNull();
+            assertThat(MDC.get("eventId")).isNull();
+        } finally {
+            MDC.clear();
+        }
 
         assertThat(consume(1, copy -> copy.payload().equals(succeeding.payload())))
                 .extracting(Published::payload).containsExactly(succeeding.payload());
@@ -85,6 +113,9 @@ class OutboxPublisherIT extends InventoryPostgresIntegrationTest {
         assertThat(jdbc.queryForObject(
                         "select next_attempt_at from outbox where id = ?", Instant.class, failed.rowId()))
                 .isAfter(Instant.now().minusSeconds(1));
+        assertThat(publishFailures() - failuresBefore).isEqualTo(1.0);
+        assertStructuredIds(output, "Outbox publish failed", failed);
+        assertStructuredIds(output, "Published outbox event", succeeding);
 
         jdbc.update("update outbox set topic = ?, next_attempt_at = now() where id = ?", TOPIC, failed.rowId());
         publisher.publishBatch();
@@ -93,6 +124,7 @@ class OutboxPublisherIT extends InventoryPostgresIntegrationTest {
         assertThat(jdbc.queryForObject(
                         "select published_at from outbox where id = ?", Instant.class, failed.rowId()))
                 .isNotNull();
+        assertThat(publishFailures() - failuresBefore).isEqualTo(1.0);
     }
 
     @Test
@@ -165,6 +197,24 @@ class OutboxPublisherIT extends InventoryPostgresIntegrationTest {
                 + "values (?,?,?,?,?,?,now(),now(),0)",
                 rowId, eventId, orderId, "ReservationResult", topic, payload);
         return new TestEvent(rowId, eventId, orderId, payload);
+    }
+
+    private double publishFailures() {
+        return metrics.find("reservation.outbox.publish.failures").counters().stream()
+                .mapToDouble(counter -> counter.count()).sum();
+    }
+
+    private static void assertStructuredIds(CapturedOutput output, String message, TestEvent event) {
+        String line = output.getOut().lines()
+                .filter(candidate -> candidate.contains(message) && candidate.contains(event.eventId().toString()))
+                .findFirst().orElseThrow();
+        try {
+            var json = new tools.jackson.databind.ObjectMapper().readTree(line);
+            assertThat(json.get("orderId").asText()).isEqualTo(event.orderId().toString());
+            assertThat(json.get("eventId").asText()).isEqualTo(event.eventId().toString());
+        } catch (Exception exception) {
+            throw new AssertionError("Expected a parseable structured log", exception);
+        }
     }
 
     private List<Published> consume(int expected, Predicate<Published> filter) {

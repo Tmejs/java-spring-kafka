@@ -29,6 +29,9 @@ public class KafkaHealthIndicator implements HealthIndicator {
         try {
             admin.describeCluster().clusterId().get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             return Health.up().build();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return Health.down().build();
         } catch (Exception exception) {
             return Health.down().build();
         } finally {

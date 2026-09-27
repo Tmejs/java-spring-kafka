@@ -7,6 +7,7 @@ import io.github.tmejs.reservation.events.EventCodec;
 import io.github.tmejs.reservation.events.EventMetadata;
 import io.github.tmejs.reservation.events.StockRejected;
 import io.github.tmejs.reservation.events.StockReserved;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.github.tmejs.reservation.orders.OrderApplication;
 import io.github.tmejs.reservation.orders.support.OrderPostgresIntegrationTest;
 import java.sql.Timestamp;
@@ -26,6 +27,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest(classes = OrderApplication.class, properties = "reservation.outbox.scheduling-enabled=false")
 @Import(OrderOutcomeIT.FixedClockConfiguration.class)
@@ -35,6 +38,8 @@ class OrderOutcomeIT extends OrderPostgresIntegrationTest {
 
     @Autowired private OrderOutcomeService outcomes;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private MeterRegistry metrics;
+    @Autowired private PlatformTransactionManager transactions;
 
     @BeforeEach
     void clearData() {
@@ -69,12 +74,29 @@ class OrderOutcomeIT extends OrderPostgresIntegrationTest {
         Source source = pendingOrder();
         UUID resultId = UUID.randomUUID();
         StockReserved event = reserved(source, resultId);
+        double outcomesBefore = outcomeCount();
 
         outcomes.confirm(event);
         outcomes.confirm(event);
 
         assertThat(status(source.orderId())).isEqualTo("CONFIRMED");
         assertThat(processedEventCount()).isOne();
+        assertThat(outcomeCount() - outcomesBefore).isEqualTo(1.0);
+    }
+
+    @Test
+    void rolledBackOutcomeDoesNotIncrementOutcomeCounter() {
+        Source source = pendingOrder();
+        double outcomesBefore = outcomeCount();
+
+        assertThatThrownBy(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            outcomes.confirm(reserved(source, UUID.randomUUID()));
+            throw new IllegalStateException("force rollback after metric registration");
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(status(source.orderId())).isEqualTo("PENDING");
+        assertThat(processedEventCount()).isZero();
+        assertThat(outcomeCount() - outcomesBefore).isZero();
     }
 
     @Test
@@ -230,6 +252,11 @@ class OrderOutcomeIT extends OrderPostgresIntegrationTest {
 
     private Instant processedAt() {
         return jdbc.queryForObject("select processed_at from processed_events", Instant.class);
+    }
+
+    private double outcomeCount() {
+        return metrics.find("reservation.outcomes").counters().stream()
+                .mapToDouble(counter -> counter.count()).sum();
     }
 
     private record Source(UUID orderId, UUID createdEventId) {}
