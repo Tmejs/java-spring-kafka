@@ -186,3 +186,24 @@ their actual outcomes, and any remaining limitations before committing and pushi
   focused fix with no Critical or Important findings. The implementer Java 25 gate
   passed all six modules and 70 tests. Fresh controller verification passed the same
   six modules and 70 tests with zero failures, errors, or skips in 3:29.
+
+## Order outcomes and dead-letter recovery checkpoint — 2026-09-27
+
+- Added the `reservation-results.v1` Orders listener and transactional outcome
+  service. It locks the order, validates the persisted OrderCreated causation ID,
+  claims result IDs conflict-safely, and permits one PENDING-to-terminal transition.
+- Duplicate delivery and new IDs carrying the same outcome are idempotent. Opposite
+  outcomes, changed rejection reasons, wrong causation, unknown orders, and invalid
+  reason codes remain technical failures and cannot turn an order into REJECTED.
+- Both consumers use record acknowledgement, four total delivery attempts separated
+  by one-second blocking backoffs, then publish the original key/value to the
+  source-specific `.DLT`. Recovery waits for the broker acknowledgement.
+- Real Kafka tests prove malformed/version failures, transient recovery, exhaustion,
+  exact retry counts/timing, post-commit redelivery, and no source-offset advancement
+  while DLT publication fails. Broker-selected DLT partitions support a one-partition
+  DLT even when the failed source record came from partition 1.
+- Independent review requested enum-tight rejection reasons, real Orders Kafka
+  redelivery evidence, and partition-count-safe DLT routing. The focused fix passed
+  scoped re-review with no Critical or Important findings. The implementer Java 25
+  gate passed all six modules and 91 tests. Fresh controller verification passed
+  the same six modules and 91 tests with zero failures, errors, or skips in 4:13.

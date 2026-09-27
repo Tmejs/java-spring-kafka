@@ -16,11 +16,11 @@ claims of delivered functionality. Test names may evolve with implementation.
 | Flyway ownership | 3 | fresh PostgreSQL schemas and restricted credentials | Schemas verified; role isolation pending Compose |
 | All-or-nothing reservation | 6 | multi-item failure leaves every stock count unchanged | Verified |
 | No overselling | 6 | competing transactions and exact final stock | Verified |
-| Duplicate protection | 6,7 | same event and different event ID for same order | Inventory verified; Orders pending |
+| Duplicate protection | 6,7 | same event and different event ID for same order | Verified in both services |
 | Outbox recovery | 5 | broker unavailable/recovered and send-before-mark replay | Verified in both services |
-| Consumer DB/offset gap | 6,7 | redelivery cannot repeat business effect | Inventory redelivery verified; Orders pending |
-| Terminal consistency | 7 | conflicting result cannot overwrite state | Pending |
-| Retry and DLT | 7 | malformed/exhausted events, unavailable DLT producer | Pending |
+| Consumer DB/offset gap | 6,7 | redelivery cannot repeat business effect | Verified in both services |
+| Terminal consistency | 7 | conflicting result cannot overwrite state | Verified |
+| Retry and DLT | 7 | malformed/exhausted events, unavailable DLT producer | Verified in both services |
 | Safe manual replay | 10 | exact key/payload/ID preserved | Pending |
 | Actuator protection | 8 | public minimal health, scoped metrics access | Policy verified; Actuator pending |
 | Observability | 8 | bounded labels, committed-only counters, MDC cleanup | Pending |

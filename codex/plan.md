@@ -280,21 +280,21 @@ both services `messaging/KafkaErrorHandlingConfiguration.java`;
 **Interfaces:** `OrderOutcomeService.confirm(StockReserved)` and
 `reject(StockRejected)` update the order and processed event atomically.
 
-- [ ] Test successful/rejected state updates, duplicate result, conflicting terminal
+- [x] Test successful/rejected state updates, duplicate result, conflicting terminal
   result, unknown order, and redelivery after DB commit before offset commit:
   ```java
   assertThat(order.status()).isEqualTo(CONFIRMED);
   assertThat(processedEventCount).isEqualTo(1);
   ```
-- [ ] Lock the order row; allow PENDING to transition, treat same terminal outcome
+- [x] Lock the order row; allow PENDING to transition, treat same terminal outcome
   as a no-op, and reject contradictory outcomes. Validate causation against the
   stored order-created event. Unknown orders are processing errors.
-- [ ] Configure bounded blocking retries (three retries at one-second intervals),
+- [x] Configure bounded blocking retries (three retries at one-second intervals),
   then dead-letter to `<source>.DLT`. Decode strings inside the listener so malformed
   payloads enter recovery. Require confirmed DLT send before advancing the offset.
-- [ ] Test malformed JSON, unsupported version, transient recovery, exhausted retry,
+- [x] Test malformed JSON, unsupported version, transient recovery, exhausted retry,
   and DLT producer failure. Assert technical failures never mark an order REJECTED.
-- [ ] Run focused tests and `./mvnw verify`; commit/push:
+- [x] Run focused tests and `./mvnw verify`; commit/push:
   `feat: apply order outcomes and recover failed Kafka messages`.
 
 ## 8. Actuator, metrics, and structured logs

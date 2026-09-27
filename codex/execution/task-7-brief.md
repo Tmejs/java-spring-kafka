@@ -62,3 +62,42 @@ both services `messaging/KafkaErrorHandlingConfiguration.java`;
   and DLT producer failure. Assert technical failures never mark an order REJECTED.
 - [ ] Run focused tests and `./mvnw verify`; commit/push:
   `feat: apply order outcomes and recover failed Kafka messages`.
+
+## Execution context
+
+- Baseline is reviewed and remotely synchronized commit `6ea62d8`: Java 25,
+  Spring Boot 4.1.1, reliable outbox publishers, Inventory reservation processing,
+  and a record-acknowledged `orders.v1` listener. The local reactor has 70 tests.
+- Java 25 is active through SDKMAN. There is no GitHub Actions pipeline; local
+  `./mvnw -B verify` is the gate. Reuse managed Spring Kafka 4.1.1, Kafka client
+  4.2.1, Testcontainers 2.0.5, PostgreSQL 18.1, and Kafka image 4.1.1.
+- Orders must add String consumer configuration with auto-commit disabled and record
+  acknowledgement. The result listener decodes inside the listener method so JSON,
+  type, version, metadata, and domain validation failures reach the container error
+  handler. Inventory's existing listener must use the same recovery policy.
+- `OrderOutcomeService` owns the database transaction. Lock the owner-independent
+  order row by ID for outcome processing, claim result event IDs conflict-safely,
+  and update the order plus processed-event record atomically. HTTP reads remain
+  owner-qualified; the internal consumer lookup is not an API authorization path.
+- Validate required result metadata, order ID, occurredAt, causationId, and bounded
+  rejection reason. Validate causation against the persisted OrderCreated outbox
+  event ID for that order. Unknown orders, wrong causation, malformed results, and
+  contradictory terminal outcomes are technical errors and must never create a
+  business rejection.
+- PENDING may transition once. Exact event redelivery is a no-op. A new event ID
+  carrying the same terminal outcome may be recorded without changing state. A
+  contradictory outcome must throw and roll back its processed-event claim.
+- Configure a shared bounded blocking-retry policy in each service: three retries at
+  one-second intervals, then publish the original key/value to `<source>.DLT`. Commit
+  the source offset only after the DLT producer acknowledgement succeeds. If DLT
+  publication fails, do not recover/advance the source offset. Keep identifiers in
+  logs and do not add task-8 metrics yet.
+- Integration tests must use real Kafka/PostgreSQL and explicit unique source/DLT
+  topics or exact record filtering. Prove malformed JSON and unsupported versions,
+  transient recovery before DLT, exhausted retry to DLT, DLT producer failure, and
+  Orders redelivery/terminal consistency. Use bounded Awaitility, not sleeps.
+- Task 10 owns the manual replay script/documentation; expose enough stable topic/key
+  behavior for that work but do not add an automatic replay service.
+- Parent owns ledger, acceptance matrix, briefs, review artifacts, and pushes.
+  Commit implementation locally after focused tests and a full local verification;
+  do not push.

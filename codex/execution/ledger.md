@@ -178,3 +178,23 @@ Task 6: complete (commits 3dc08b1 and ceb6e83; review clean after one fix round)
 Implementer full SDKMAN Temurin 25.0.4 `./mvnw -B verify` PASS: six modules,
 70 tests, zero failures/errors/skips. Fresh controller-owned verification also
 PASS: six modules, 70 tests, zero failures/errors/skips in 3:29.
+Task 6 remote checkpoint: local and remote SHA matched at 6ea62d8 after review
+records were committed and pushed.
+Task 7: in progress; base 6ea62d8; implementer order_outcomes_recovery.
+Task 7: locally implemented in 9f7596e. Full SDKMAN Java 25 reactor verification
+PASS: six modules, 90 tests, zero failures/errors/skips. Independent reviewer
+order_outcomes_review dispatched against 6ea62d8..9f7596e.
+Task 7 review: fix round 1/5 for three Important findings: restrict rejection
+reasons to the public enum, prove real Orders Kafka redelivery after DB commit,
+and remove the assumption that DLT partition counts match source topics.
+Task 7 review: minor (deferred): processed_events stores only a global event ID,
+so it cannot prove all identifying fields are identical on an illegal ID collision.
+Task 7: fix round 1/5 addressed in 6421892. Rejection reasons now match the public
+enum; Orders proves identical Kafka redelivery after the first DB commit; both DLT
+recoverers use broker-selected partitions and both suites prove source partition 1
+recovers to a one-partition DLT with exact key/value and correct offset handling.
+Scoped re-review approved with zero open Critical/Important findings.
+Task 7: complete (commits 9f7596e and 6421892; review clean after one fix round).
+Implementer full SDKMAN Temurin 25.0.4 `./mvnw -B verify` PASS: six modules,
+91 tests, zero failures/errors/skips. Fresh controller-owned verification also
+passed all six modules and 91 tests with zero failures/errors/skips in 4:13.
