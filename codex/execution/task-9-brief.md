@@ -63,3 +63,16 @@ localhost API/management/identity mappings. Do not publish Kafka host ports.
 - [ ] Restart services and confirm data survives. Stop/start the broker and confirm
   outbox delivery recovers. Leave volume deletion as an explicitly documented reset.
 - [ ] Commit/push: `build: run reservation services and infrastructure with Compose`.
+
+## Execution baseline
+
+- Start from merged and remote-synchronized `main` commit `52bf6cc` on the fresh
+  branch `codex/checkpoint-9-compose`.
+- The controller baseline is SDKMAN Temurin 25.0.4 with a green six-module reactor
+  and 104 tests (zero failures, errors, or skips).
+- Use the Docker Compose plugin available on this host and pin every base/runtime
+  image to an explicit version that supports the host architecture.
+- Keep service-account credentials demo-only and sourced from `.env`; never print
+  tokens or secrets during verification.
+- Verification must exercise the real built images and dependency health gates,
+  persistence across service restarts, and broker-outage outbox recovery.

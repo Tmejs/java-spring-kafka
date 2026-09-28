@@ -333,22 +333,22 @@ both services `observability/ObservabilityIT.java`; listener correlation handlin
 four explicit topics, Keycloak with its own database, persistent volumes,
 localhost API/management/identity mappings. Do not publish Kafka host ports.
 
-- [ ] Build service jars with a Java 25 Maven build stage, copy executable jars
+- [x] Build service jars with a Java 25 Maven build stage, copy executable jars
   into Java 25 runtime images running as non-root. Pin real image tags verified
   available for the host architecture. Keep health-check tools available in images.
-- [ ] Configure separate database owners without cross-database table grants.
+- [x] Configure separate database owners without cross-database table grants.
   Initialize `orders.v1`, `reservation-results.v1`, and both `.DLT` topics.
-- [ ] Add pinned Keycloak in local development mode with realm import, a separate
+- [x] Add pinned Keycloak in local development mode with realm import, a separate
   database/role, and localhost port 8180. Configure external issuer/internal JWKS
   routing consistently; verify tokens issued through localhost work in containers.
-- [ ] Map Orders API/management to localhost 8080/9080; Inventory to 8081/9081.
+- [x] Map Orders API/management to localhost 8080/9080; Inventory to 8081/9081.
   Add named data volumes, health checks, and dependency readiness conditions.
   Use explicit demo-only database credentials; no real secrets in Git.
-- [ ] Run `docker compose config --quiet`, `./mvnw verify`, and
+- [x] Run `docker compose config --quiet`, `./mvnw verify`, and
   `docker compose up --build --wait`; assert Swagger/specs and probe endpoints work.
-- [ ] Restart services and confirm data survives. Stop/start the broker and confirm
+- [x] Restart services and confirm data survives. Stop/start the broker and confirm
   outbox delivery recovers. Leave volume deletion as an explicitly documented reset.
-- [ ] Commit/push: `build: run reservation services and infrastructure with Compose`.
+- [x] Commit/push: `build: run reservation services and infrastructure with Compose`.
 
 ## 10. Reproducible demo and portfolio documentation
 

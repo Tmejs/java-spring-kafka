@@ -227,3 +227,24 @@ their actual outcomes, and any remaining limitations before committing and pushi
 - The implementer clean Java 25 reactor passed all six modules and 104 tests with
   zero failures, errors, or skips. Fresh controller verification passed the same
   six modules and 104 tests with zero failures, errors, or skips in 1:59.
+
+## Complete Compose runtime checkpoint — 2026-09-28
+
+- Added a root Compose topology for PostgreSQL, a persistent single-node KRaft
+  broker, explicit topic initialization, Keycloak, Orders, and Inventory. Only the
+  APIs, management ports, and Keycloak bind to localhost.
+- Added pinned Java 25 multi-stage images that build from the Maven reactor and run
+  as fixed non-root users. PostgreSQL creates isolated service-owned databases, and
+  cross-database access is denied. Kafka and PostgreSQL have no host ports.
+- Keycloak exposes the localhost issuer while services fetch JWKS over the internal
+  network. Real client-credentials tests covered service audiences, roles, and the
+  protected Prometheus endpoint.
+- A real product/order flow reached CONFIRMED. With Kafka stopped, a second order
+  stayed PENDING with one unpublished outbox row, then recovered after broker restart.
+  Volume-preserving down/up retained orders, stock, topics, offsets, and realm data.
+- Added the root README with architecture, modules, startup, ports, security,
+  verification, reliability guarantees, reset behavior, and links to Codex records.
+- Independent review passed with no Critical or Important findings. A TCP-only Kafka
+  probe was strengthened to a bounded ApiVersions request; topic initialization is
+  the functional startup gate. The controller Java 25 reactor passed 104 tests in
+  1:56, and a clean isolated Compose smoke run passed all health and non-root checks.
