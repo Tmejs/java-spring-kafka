@@ -15,6 +15,7 @@
         <module>api-contracts</module>
         <module>api-clients</module>
         <module>event-contracts</module>
+        <module>dlt-replay-tool</module>
         <module>order-service</module>
         <module>inventory-service</module>
     </modules>
@@ -31,6 +32,7 @@
         <maven-compiler-plugin.version>3.16.0</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.6.0</maven-surefire-plugin.version>
         <maven-failsafe-plugin.version>3.6.0</maven-failsafe-plugin.version>
+        <maven-shade-plugin.version>3.6.2</maven-shade-plugin.version>
     </properties>
 
     <dependencyManagement>

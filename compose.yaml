@@ -80,6 +80,16 @@ services:
       - ./infra/kafka/init-topics.sh:/init/init-topics.sh:ro
     restart: "no"
 
+  dlt-replay:
+    profiles: [tools]
+    build:
+      context: .
+      dockerfile: dlt-replay-tool/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.7.4
     command:
