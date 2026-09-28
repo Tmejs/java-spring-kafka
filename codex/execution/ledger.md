@@ -217,3 +217,26 @@ Task 8: complete (commits 70aaa9c and b839c7c; review clean after one fix round)
 Implementer full SDKMAN Temurin 25.0.4 `./mvnw -B clean verify` PASS: six modules,
 104 tests, zero failures/errors/skips. Fresh controller-owned `./mvnw -B verify`
 also passed all six modules and 104 tests with zero failures/errors/skips in 1:59.
+Checkpoints 1-8 were merged into `main` in a4bb776 and the wrapper line-ending
+normalization followed in 52bf6cc. Local and remote `main` matched at 52bf6cc.
+Future checkpoints use a fresh branch from synchronized `main`, then merge after
+their review and controller verification gates.
+Task 9: in progress on `codex/checkpoint-9-compose`; base 52bf6cc; Compose runtime
+implementation and independent infrastructure audit dispatched.
+Task 9: locally implemented in 91f7d20. Runtime verification covered a clean
+container build/start, real Keycloak tokens, secured metrics, a confirmed order,
+Kafka-down pending outbox recovery, persistent data across down/up, database-role
+isolation, non-root Java 25 users, and localhost-only host bindings. Implementer
+Java 25 `./mvnw -B verify` PASS: six modules, 104 tests, zero failures/errors/skips.
+Task 9 review: zero Critical/Important findings. The reviewer noted a Minor TCP-only
+Kafka health probe; functional topic initialization already guarded application
+startup, but the probe was strengthened in 3f049e4 to issue a bounded Kafka
+ApiVersions request. Scoped re-review approved with no Critical/Important findings.
+Deferred Minor: the probe validates at least the Kafka response header length rather
+than the correlation ID and complete declared response; topic initialization remains
+the stronger functional gate.
+Task 9: complete (commits 91f7d20 and 3f049e4; review clean).
+Fresh controller-owned SDKMAN Temurin 25.0.4 `./mvnw -B verify` PASS: six modules,
+104 tests, zero failures/errors/skips in 1:56. A fresh isolated Compose build/start
+also passed: both specs/readiness endpoints returned 200, all long-running services
+were healthy, and both applications ran as UID 10001; test containers/volumes removed.
