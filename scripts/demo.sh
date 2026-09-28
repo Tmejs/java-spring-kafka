@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 set +x
+set +v
 umask 077
 
 readonly KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8180}"
@@ -54,7 +55,7 @@ token_for() {
     --data-binary @- \
     "$KEYCLOAK_URL/realms/reservation/protocol/openid-connect/token")" \
     || fail "could not obtain token for $client_id"
-  jq -er '.access_token | select(type == "string" and length > 0)' <<<"$response" \
+  printf '%s' "$response" | jq -er '.access_token | select(type == "string" and length > 0)' \
     || fail "Keycloak returned no access token for $client_id"
 }
 

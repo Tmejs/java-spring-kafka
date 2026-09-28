@@ -298,7 +298,7 @@ Select Java 25 and keep Docker running:
 docker compose config --quiet
 ```
 
-The seven-module reactor runs unit tests and Failsafe integration tests with real
+The six child modules plus the parent reactor run unit tests and Failsafe integration tests with real
 PostgreSQL, Kafka, and Keycloak. Coverage includes migrations, generated clients,
 JWT and ownership, HTTP and consumer idempotency, atomic/concurrent reservations,
 outbox recovery, redelivery, DLT handling, health, metrics, and correlation data.

@@ -31,7 +31,8 @@ input configuration.
 
 - `bash -n scripts/demo.sh scripts/replay-dlt.sh`: passed.
 - `docker compose config --quiet`: passed.
-- SDKMAN Temurin 25.0.4, `./mvnw -B verify`: seven modules, 109 tests, zero
+- SDKMAN Temurin 25.0.4, `./mvnw -B verify`: six child modules plus the parent,
+  109 tests, zero
   failures, zero errors, zero skips, `BUILD SUCCESS` in 1:52.
 - `./scripts/demo.sh && ./scripts/demo.sh`: passed twice consecutively against
   retained volumes. Each run confirmed quantity 3, rejected quantity 8 with
