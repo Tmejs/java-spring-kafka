@@ -49,6 +49,11 @@
 - The first clean-volume startup exposed a missing executable bit on the mounted
   PostgreSQL initializer. After setting the repository mode to executable, another
   clean-volume build and startup passed all gates.
+- Review cleanup replaced the broker's TCP-open probe with a bounded Kafka
+  `ApiVersions` request. The Native 4.1.1 image intentionally contains the broker
+  binary rather than the JVM distribution's administration scripts, so the probe
+  sends a protocol request through `nc`, requires a Kafka response of at least the
+  response-header length, and emits no response body.
 
 ## Runtime behavior evidence
 
@@ -76,6 +81,10 @@
 - SDKMAN Temurin `25.0.4`, `./mvnw -B verify`: six-module reactor `BUILD SUCCESS`
   in 1:55; 104 tests, zero failures, zero errors, zero skipped across 25 reports.
 - `git diff --check` passed.
+- Focused review verification started Kafka storage initialization, the broker, and
+  topic initialization in a fresh isolated project. The broker became healthy only
+  after answering the protocol request; topic initialization then created and
+  listed all four expected topics before exiting successfully.
 - Runtime checks used the isolated `reservation-task9` Compose project. Its
   containers and named volumes were removed after verification, so no checkpoint
   test data was left running on the host.

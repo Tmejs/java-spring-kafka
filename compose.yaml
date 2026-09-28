@@ -59,7 +59,11 @@ services:
     volumes:
       - kafka-data:/tmp/kraft-combined-logs
     healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "9092"]
+      test:
+        - CMD-SHELL
+        - >-
+          test "$$(printf '\x00\x00\x00\x10\x00\x12\x00\x00\x00\x00\x00\x01\x00\x06health'
+          | nc -w 2 127.0.0.1 9092 | wc -c)" -ge 8
       interval: 5s
       timeout: 5s
       retries: 20
