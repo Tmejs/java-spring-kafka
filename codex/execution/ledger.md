@@ -240,3 +240,19 @@ Fresh controller-owned SDKMAN Temurin 25.0.4 `./mvnw -B verify` PASS: six module
 104 tests, zero failures/errors/skips in 1:56. A fresh isolated Compose build/start
 also passed: both specs/readiness endpoints returned 200, all long-running services
 were healthy, and both applications ran as UID 10001; test containers/volumes removed.
+Checkpoint 9 was pushed at e858b60 and merged into `main` in 18030dc. Local and
+remote `main` matched at 18030dc.
+Task 10: in progress on `codex/checkpoint-10-demo-docs`; base 18030dc; reproducible
+demo/replay implementation and independent operator-safety audit dispatched.
+Task 10: implementation committed in 002e8ed. Demo passed twice during delegated
+verification and three controller runs after handoff, always against retained data.
+Java 25 full verification PASS: parent plus six child modules, 109 tests, zero
+failures/errors/skips in 1:52. Script syntax and Compose configuration passed.
+Task 10 runtime recovery: valid event reached orders.v1.DLT[0]@0 during temporary
+Inventory DB denial. After recovery, exact replay confirmed the order and decremented
+stock once; duplicate replay left stock=6, reservation count=1, processed marker=1,
+and DLT end offset=1.
+Task 10 review: three Important script findings (token-response here-string,
+inherited verbose mode, and unbounded Docker commands) fixed in c576a7c. Scoped
+re-review approved with zero remaining Critical/Important findings; five focused
+replay tests passed. Alice browser login through Swagger PKCE S256 was also verified.
