@@ -248,3 +248,32 @@ their actual outcomes, and any remaining limitations before committing and pushi
   probe was strengthened to a bounded ApiVersions request; topic initialization is
   the functional startup gate. The controller Java 25 reactor passed 104 tests in
   1:56, and a clean isolated Compose smoke run passed all health and non-root checks.
+
+## Reproducible demo and recovery checkpoint — 2026-09-29
+
+- Added a repeatable `scripts/demo.sh` flow using distinct Orders, Inventory, and
+  monitoring service accounts. Tokens and secrets stay out of argv, files, child
+  environments, verbose/xtrace output, and logs. Each HTTP operation and order poll
+  has a finite deadline.
+- Consecutive retained-volume runs created unique products, confirmed quantity-3
+  orders, rejected quantity-8 orders with `INSUFFICIENT_STOCK`, proved exactly 7
+  units remained, and authenticated to both Prometheus endpoints. Controller runs
+  passed three more times after implementation and security-review fixes.
+- Added a Java 25 raw-byte replay module behind a Compose tools profile and a strict
+  wrapper requiring DLT topic, partition, and offset. Five focused tests cover
+  newline/NUL, empty and null key/value bytes, exact offset selection, allowlisting,
+  exactly one output, and no consumer offset commit.
+- Runtime recovery denied new Inventory database connections until one valid event
+  reached `orders.v1.DLT[0]@0`. Restoring the database and replaying confirmed the
+  order and decremented stock once. Replaying the same DLT record again left stock
+  at 6, one reservation, one processed-event marker, and the DLT end offset at 1.
+- SDKMAN Temurin 25.0.4 `./mvnw -B verify` passed the parent and six child modules:
+  109 tests, zero failures, zero errors, zero skips in 1:52. `bash -n` and
+  `docker compose config --quiet` also passed.
+- Alice completed the Orders Swagger Authorization Code flow with PKCE S256 and the
+  `orders-api` scope; Swagger displayed the OAuth authorization as active. Machine
+  client credentials were exercised by the repeatable demo.
+- Independent review found three Important shell-safety issues: Bash here-string
+  token materialization, inherited verbose mode, and unbounded Docker commands.
+  Commit `c576a7c` fixed all three; scoped re-review passed with no remaining
+  Critical or Important findings.

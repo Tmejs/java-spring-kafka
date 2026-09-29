@@ -21,10 +21,10 @@ claims of delivered functionality. Test names may evolve with implementation.
 | Consumer DB/offset gap | 6,7 | redelivery cannot repeat business effect | Verified in both services |
 | Terminal consistency | 7 | conflicting result cannot overwrite state | Verified |
 | Retry and DLT | 7 | malformed/exhausted events, unavailable DLT producer | Verified in both services |
-| Safe manual replay | 10 | exact key/payload/ID preserved | Pending |
+| Safe manual replay | 10 | exact key/payload/ID preserved | Verified: exact raw-byte replay and duplicate-safe runtime recovery |
 | Actuator protection | 8 | public minimal health, scoped metrics access | Verified on separate management sockets with signed JWTs |
 | Observability | 8 | bounded labels, committed-only counters, MDC cleanup | Verified in both services |
 | One-command launch | 9 | Compose build and health readiness | Verified from clean isolated project |
 | Persistent data | 9 | restart retains stock/orders | Verified across volume-preserving down/up |
-| Portfolio demo | 10 | repeatable successful/rejected orders and metric scrape | Pending |
-| Security demo | 10 | browser PKCE plus machine token script | Pending |
+| Portfolio demo | 10 | repeatable successful/rejected orders and metric scrape | Verified repeatedly against retained volumes |
+| Security demo | 10 | browser PKCE plus machine token script | Verified: Alice Swagger PKCE S256 and three scoped machine clients |
